@@ -1,5 +1,5 @@
 # MiniMacAppBridge (miniMac App 引桥) - mmab-server
-# 设计骨架配置：不含 TLS、认证与桥接实现，仅监听回环地址，不可用于远程访问。
+# M1：离线协议与安全骨架。默认配置不启动任何适配器、不连接任何真实应用；只监听回环地址。
 # 端口均为设计文档 §5.1 的建议值，部署时在此确定；实例与端口静态绑定。
 
 spring:
@@ -7,9 +7,12 @@ spring:
     name: mmab-server
   main:
     web-application-type: reactive
+  web:
+    resources:
+      add-mappings: false   # 静态内容由 ContentController 按监听角色提供，不用默认 /** 映射
 
 server:
-  # 骨架阶段只有控制台一个监听；实例端口（8444+）的多监听在 M1+ 实现。
+  # 控制台监听；地址 / 端口 / TLS 由 WebConfig 按 mmab.console.* 与 mmab.web.tls-bundle 设置。
   address: ${mmab.console.bind-address}
   port: ${mmab.console.port}
 
@@ -17,11 +20,37 @@ mmab:
   platform:
     # 构建时由 Maven 资源过滤填入（spring-boot-starter-parent 的 @..@ 占位符）
     version: "@project.version@"
+  # 仓库 / 安装根目录：adapters.*、web.* 中的相对路径以此为基准
+  home: .
   console:
     port: 8443
-    # 骨架只绑回环；正式版只绑精确 LAN IP 与 127.0.0.1，绝不绑 0.0.0.0（设计 §5.1）
+    # 默认只绑回环；正式版只绑精确 LAN IP 与 127.0.0.1，绝不绑 0.0.0.0（设计 §5.1）
     bind-address: 127.0.0.1
-  # 实例示例配置：enabled=false 表示仅登记、不开监听（骨架未实现实例监听与适配器）。
+  web:
+    # Host / Origin 精确匹配用的主机；部署 LAN 访问时加上 LAN IP
+    public-hosts: [127.0.0.1]
+    # Spring SSL bundle 名（spring.ssl.bundle.*）；为空时只允许回环明文 HTTP（开发 / 测试）
+    tls-bundle:
+    console-static-dir:
+    web-sdk-dir: sdk/web
+  timeouts:
+    ticket-ttl: 30s       # 设计 §5.3
+    lease-ttl: 60s        # 设计 §9.1
+    session-max-age: 8h   # 设计 §6.1
+    session-idle: 30m
+    request-deadline: 30s
+  operator:
+    # PBKDF2 hash（见 PasswordHasher）；未配置时控制台登录返回 SETUP_REQUIRED。不要把明文口令写进配置。
+    password-hash: ${MMAB_OPERATOR_PASSWORD_HASH:}
+  testing:
+    allow-test-adapters: false
+    clock-control: false
+  adapters:
+    - app-id: mock
+      descriptor: adapters/mock/adapter.yaml
+      command: [node, adapters/mock/driver/main.mjs]
+      resources: adapters/mock/fixture
+  # enabled=false 表示仅登记、不开监听、不启动适配器。
   instances:
     - id: qwen-01
       app-id: qwenwork
@@ -35,7 +64,13 @@ mmab:
       port: 8445
       strategy: electron-renderer-cdp
       enabled: false
-  # 8446-8459 预留给后续接入的应用实例
+    - id: mock-01
+      app-id: mock
+      display-name: Mock（离线测试）
+      port: 8446
+      strategy: test-mock
+      enabled: false
+  # 8447-8459 预留给后续接入的应用实例
 
 logging:
   pattern:

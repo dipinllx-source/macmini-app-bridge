@@ -1,0 +1,27 @@
+# 离线演示 / 冒烟：只启用 mock-01（strategy=test-mock，不连接任何真实应用）。
+# 用法：java -jar mmab-server.jar --spring.profiles.active=offline-mock --mmab.home=<仓库根>
+#       并通过 MMAB_OPERATOR_PASSWORD_HASH 提供操作者口令 hash；LAN 访问必须另配 mmab.web.tls-bundle。
+mmab:
+  testing:
+    allow-test-adapters: true
+  web:
+    console-static-dir: console/dist
+  instances:
+    - id: qwen-01
+      app-id: qwenwork
+      display-name: 千问
+      port: 8444
+      strategy: electron-main-inject
+      enabled: false
+    - id: codex-01
+      app-id: codex
+      display-name: Codex
+      port: 8445
+      strategy: electron-renderer-cdp
+      enabled: false
+    - id: mock-01
+      app-id: mock
+      display-name: Mock（离线测试）
+      port: 8446
+      strategy: test-mock
+      enabled: true

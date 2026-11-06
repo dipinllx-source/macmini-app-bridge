@@ -14,7 +14,7 @@
   <artifactId>mmab-server</artifactId>
   <packaging>jar</packaging>
   <name>mmab-server</name>
-  <description>MMAB Java core (Spring Boot WebFlux modular monolith) - skeleton only.</description>
+  <description>MMAB Java core (Spring Boot WebFlux modular monolith) - M1 offline protocol and security skeleton.</description>
 
   <dependencies>
     <dependency>

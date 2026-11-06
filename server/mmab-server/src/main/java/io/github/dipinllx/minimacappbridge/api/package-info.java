@@ -1,2 +1,2 @@
-/** 平台外部 API（骨架阶段仅只读健康接口；完整草案见设计文档 §10.2）。 */
+/** 平台 API：控制台端口（健康、登录、实例、租约、开窗票据、审计）与实例端口（exchange、引导数据、WS、静态内容），见设计 §10.2。 */
 package io.github.dipinllx.minimacappbridge.api;

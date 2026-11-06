@@ -8,8 +8,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 /**
  * MiniMacAppBridge（miniMac App 引桥）Java 核心入口。
  *
- * <p>设计骨架：只提供只读健康接口，不含认证、TLS、实例监听、租约、代理或任何桥接实现，
- * 不可用于远程访问。
+ * <p>M1 离线协议与安全骨架：多端口 TLS 监听、开窗票据、会话、租约、网关过滤器、WS 数据面与适配器进程管理；
+ * 只接入离线 mock 适配器，未接入任何真实应用，不可用于远程访问。
  */
 @SpringBootApplication
 @EnableConfigurationProperties(MmabProperties.class)
