@@ -23,7 +23,7 @@ const store = useInstancesStore()
         </el-descriptions>
         <div class="actions">
           <el-button size="small" @click="$router.push(`/instances/${i.id}`)">详情</el-button>
-          <el-tooltip content="骨架阶段未实现开窗票据" placement="top">
+          <el-tooltip content="MOCK 卡片；真实开窗入口见「开窗（M1）」" placement="top">
             <el-button size="small" type="primary" disabled>打开应用</el-button>
           </el-tooltip>
         </div>

@@ -2,12 +2,18 @@
 
 miniMac App 引桥 控制台（Vue 3 + TypeScript + Vite + Pinia + Vue Router + Element Plus）。
 
-骨架阶段：页面结构完整，数据全部来自 `src/mock/`（明确标注 MOCK）；仅顶部服务端状态调用真实的只读健康接口。
+M1 状态：
+
+- 「开窗（M1）」页面调用真实接口：操作者登录 → 实例列表 → 「打开应用」签发一次性票据，并以表单 POST
+  在新标签提交到实例端口的 `/__mmab/session/exchange`。CSRF token 只在 `src/api/bridge.ts` 模块内存中，
+  票据只存在于那一次表单提交里，都不进 Pinia / localStorage / URL。
+- 其余页面（总览、实例详情、生命周期、版本兼容、安全与审计）仍是 `src/mock/` 的 MOCK 数据。
 
 ```bash
 npm ci
-npm run dev     # http://127.0.0.1:5173，/__mmab 代理到 127.0.0.1:8443
 npm run build   # vue-tsc 类型检查 + 生产构建到 dist/
 ```
 
-页面：应用总览、实例详情、生命周期、版本兼容、安全与审计。
+运行：由 mmab-server 直接提供构建产物（`mmab.web.console-static-dir=console/dist`），这样页面与平台 API 同源，
+Origin / CSRF / Sec-Fetch-Site 校验才成立。`npm run dev` 的 Vite 代理会改变 Origin，只适合看界面，
+写接口会被服务端按设计拒绝（ORIGIN_REJECTED）。
