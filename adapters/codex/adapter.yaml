@@ -1,0 +1,36 @@
+# MMAB adapter descriptor (draft) - Codex
+# 能力状态取自原型验收结论；平台实现尚未开始，所有能力在平台中实际均未启用。
+schemaVersion: 1
+appId: codex
+displayName: Codex
+strategy: electron-renderer-cdp
+protocol: { min: "1.0", max: "1.0" }
+app:
+  bundleId: TBD            # 在 M3 由 tools/probe 实测填写
+  executableAllowlist: [TBD]
+  versionSource: Info.plist
+permissions:
+  launchArguments: true      # 独立 profile + 远程调试端口
+  temporaryInspector: false  # 应用禁止主进程调试
+  persistentCdp: true        # renderer CDP 必须常开，仅 127.0.0.1
+  fileUploadDir: false
+risk:
+  level: high
+  notes:
+    - CDP 常开：本机其他进程理论上可控制该应用
+    - app-host 通道具备原生账号写权限，不是只读沙箱
+    - 独立 user-data-dir 不保证账号隔离
+capabilities:
+  ui.render: SUPPORTED       # 登录后原版界面与输入框可见
+  ui.history: UNVERIFIED
+  ui.compose: UNVERIFIED
+  stream.push: UNVERIFIED
+  file.upload: UNSUPPORTED
+  file.drop: UNSUPPORTED
+  clipboard.write: UNVERIFIED
+  clipboard.read: UNVERIFIED
+  media.voice: UNVERIFIED
+  app.git: UNVERIFIED        # 仅端口握手已测
+  app.extension: UNVERIFIED
+resources:
+  source: extract-from-app-bundle

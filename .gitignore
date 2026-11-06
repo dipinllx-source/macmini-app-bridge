@@ -1,0 +1,24 @@
+# build outputs
+target/
+dist/
+node_modules/
+*.log
+.vite/
+
+# IDE / OS
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# secrets & local state (never commit)
+*.pem
+*.key
+*.p12
+*.jks
+.env
+.env.*
+state/
+*.sqlite
+*.sqlite-*
+*.db

@@ -1,0 +1,42 @@
+# MiniMacAppBridge (miniMac App 引桥) - mmab-server
+# 设计骨架配置：不含 TLS、认证与桥接实现，仅监听回环地址，不可用于远程访问。
+# 端口均为设计文档 §5.1 的建议值，部署时在此确定；实例与端口静态绑定。
+
+spring:
+  application:
+    name: mmab-server
+  main:
+    web-application-type: reactive
+
+server:
+  # 骨架阶段只有控制台一个监听；实例端口（8444+）的多监听在 M1+ 实现。
+  address: ${mmab.console.bind-address}
+  port: ${mmab.console.port}
+
+mmab:
+  platform:
+    # 构建时由 Maven 资源过滤填入（spring-boot-starter-parent 的 @..@ 占位符）
+    version: "@project.version@"
+  console:
+    port: 8443
+    # 骨架只绑回环；正式版只绑精确 LAN IP 与 127.0.0.1，绝不绑 0.0.0.0（设计 §5.1）
+    bind-address: 127.0.0.1
+  # 实例示例配置：enabled=false 表示仅登记、不开监听（骨架未实现实例监听与适配器）。
+  instances:
+    - id: qwen-01
+      app-id: qwenwork
+      display-name: 千问
+      port: 8444
+      strategy: electron-main-inject
+      enabled: false
+    - id: codex-01
+      app-id: codex
+      display-name: Codex
+      port: 8445
+      strategy: electron-renderer-cdp
+      enabled: false
+  # 8446-8459 预留给后续接入的应用实例
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [mmab] %logger{36} - %msg%n"

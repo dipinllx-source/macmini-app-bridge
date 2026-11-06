@@ -1,0 +1,36 @@
+# MMAB adapter descriptor (draft) - 千问
+# 能力状态取自原型验收结论；平台实现尚未开始，所有能力在平台中实际均未启用。
+schemaVersion: 1
+appId: qwenwork
+displayName: 千问
+strategy: electron-main-inject
+protocol: { min: "1.0", max: "1.0" }
+app:
+  bundleId: TBD            # 在 M3 由 tools/probe 实测填写
+  executableAllowlist: [TBD]
+  versionSource: Info.plist
+permissions:
+  launchArguments: true      # 需以 inspect 参数启动
+  temporaryInspector: true   # 注入后立即关闭
+  persistentCdp: false
+  fileUploadDir: true
+risk:
+  level: medium
+  notes:
+    - 以真实主窗口身份调用 IPC，与本机窗口共享账号与状态
+    - 依赖应用私有 IPC 实现，升级后必须回归
+    - 普通方式启动的实例无法安全注入，需人工确认重启
+capabilities:
+  ui.render: SUPPORTED
+  ui.history: SUPPORTED
+  ui.compose: UNVERIFIED     # 旧版本已验收，当前版本未复验
+  stream.push: UNVERIFIED
+  file.upload: UNVERIFIED
+  file.drop: UNVERIFIED
+  clipboard.write: UNVERIFIED
+  clipboard.read: UNSUPPORTED   # 非 HTTPS 时浏览器不允许；HTTPS 下待验证
+  media.voice: UNVERIFIED       # 需 HTTPS
+  app.git: UNSUPPORTED
+  app.extension: UNVERIFIED
+resources:
+  source: extract-from-app-bundle

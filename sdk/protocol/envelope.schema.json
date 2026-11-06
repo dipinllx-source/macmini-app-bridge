@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dipinllx-source/minimac-app-bridge/sdk/protocol/envelope.schema.json",
+  "title": "MMAB data-plane envelope (draft, protocol v1)",
+  "description": "Mirrors server/mmab-adapter-protocol Envelope. payload is opaque, encoded by the profile codec.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocolVersion",
+    "profileId",
+    "instanceId",
+    "processGeneration",
+    "connectionId",
+    "leaseId",
+    "fencingToken",
+    "sequence",
+    "messageKind",
+    "deadline",
+    "codecVersion",
+    "payload"
+  ],
+  "properties": {
+    "protocolVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+$"
+    },
+    "profileId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "instanceId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "processGeneration": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "connectionId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "leaseId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fencingToken": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "streamId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "correlationId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "messageKind": {
+      "enum": [
+        "REQUEST",
+        "RESPONSE",
+        "EVENT",
+        "PORT_OPEN",
+        "PORT_TRANSFER",
+        "PORT_DATA",
+        "PORT_CLOSE",
+        "PORT_ERROR",
+        "HEARTBEAT",
+        "CONTROL"
+      ]
+    },
+    "deadline": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "codecVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "payload": {
+      "type": "string"
+    }
+  },
+  "if": {
+    "properties": {
+      "messageKind": {
+        "const": "RESPONSE"
+      }
+    }
+  },
+  "then": {
+    "required": [
+      "correlationId"
+    ],
+    "properties": {
+      "correlationId": {
+        "type": "string",
+        "minLength": 1
+      }
+    }
+  }
+}

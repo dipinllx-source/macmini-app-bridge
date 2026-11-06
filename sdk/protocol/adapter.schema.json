@@ -1,0 +1,255 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dipinllx-source/minimac-app-bridge/sdk/protocol/adapter.schema.json",
+  "title": "MMAB adapter.yaml (draft, protocol v1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "appId",
+    "displayName",
+    "strategy",
+    "protocol",
+    "app",
+    "permissions",
+    "risk",
+    "capabilities",
+    "resources"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "appId": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,31}$"
+    },
+    "displayName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "strategy": {
+      "enum": [
+        "electron-main-inject",
+        "electron-renderer-cdp",
+        "local-web-proxy",
+        "official-remote-api"
+      ]
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min",
+        "max"
+      ],
+      "properties": {
+        "min": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$"
+        },
+        "max": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$"
+        }
+      }
+    },
+    "app": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundleId",
+        "executableAllowlist"
+      ],
+      "properties": {
+        "bundleId": {
+          "type": "string"
+        },
+        "executableAllowlist": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1
+        },
+        "versionSource": {
+          "enum": [
+            "Info.plist",
+            "package.json",
+            "custom"
+          ]
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launchArguments",
+        "temporaryInspector",
+        "persistentCdp",
+        "fileUploadDir"
+      ],
+      "properties": {
+        "launchArguments": {
+          "type": "boolean"
+        },
+        "temporaryInspector": {
+          "type": "boolean"
+        },
+        "persistentCdp": {
+          "type": "boolean"
+        },
+        "fileUploadDir": {
+          "type": "boolean"
+        }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "level",
+        "notes"
+      ],
+      "properties": {
+        "level": {
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ui.render": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        },
+        "ui.history": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        },
+        "ui.compose": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        },
+        "stream.push": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        },
+        "file.upload": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        },
+        "file.drop": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        },
+        "clipboard.write": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        },
+        "clipboard.read": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        },
+        "media.voice": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        },
+        "app.git": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        },
+        "app.extension": {
+          "enum": [
+            "SUPPORTED",
+            "UNVERIFIED",
+            "DISABLED",
+            "UNSUPPORTED"
+          ]
+        }
+      }
+    },
+    "resources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source"
+      ],
+      "properties": {
+        "source": {
+          "enum": [
+            "extract-from-app-bundle",
+            "local-url",
+            "adapter-bundled"
+          ]
+        }
+      }
+    },
+    "package": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sha256": {
+          "type": "string",
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "signature": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
