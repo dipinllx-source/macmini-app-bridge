@@ -5,6 +5,7 @@
 > 公开版说明：原型代码与验收证据不在本仓库，文中涉及原型的源码位置已删除，仅保留机制结论。
 
 - 文档状态：设计评审稿；2026-11-06，Asia/Shanghai。
+- 实施状态（2026-11-07）：**M1 离线协议与安全骨架已完成**，仅 mock 适配器 + fixture 页面，未接入任何真实应用；验收对照见 `docs/m1-acceptance.md`，与本文的偏差见 `docs/adr/0004-m1-offline-skeleton.md`。M2 及以后未开始。
 - 默认场景：单 Mac、可信 LAN、单操作者；一个 Spring 服务，两个本地应用适配器。多节点是后续扩展，不是 MVP 前提。
 - 本轮边界：只读项目、既有验收材料和官方文档；只产出本文。不实现代码、不安装依赖、不修改安装包/签名/fuses/LaunchAgent、不启动、停止、重载或探测运行中桥的业务接口。
 - 证据时态：下文“已验证”指仓库留存的指定版本验收，不代表本轮重新验收，更不代表当前服务在线。源码路径均相对 workspace；行号对应本轮读取快照。
@@ -396,7 +397,7 @@ minimac-app-bridge/
 | 里程碑 | 范围 | 通过标准 / 失败去向 |
 |---|---|---|
 | M0 设计与证据冻结 | 本文、源文件 hash/版本清单、现有证据层级 | 评审接受边界、origin、粗粒度 native 权限和常开 CDP 风险；不满足则只观察，不实现 |
-| M1 离线协议与安全骨架 | mock adapters + 固定 fixture 原版页面；不连正式 App | ticket 重放/过期/错误 origin、CSRF、cookie host 隔离、未知 operation、lease 竞争、旧 generation、codec 和队列测试通过 |
+| M1 离线协议与安全骨架 | mock adapters + 固定 fixture 原版页面；不连正式 App | ticket 重放/过期/错误 origin、CSRF、cookie host 隔离、未知 operation、lease 竞争、旧 generation、codec 和队列测试通过。**状态：已完成（离线，2026-11-07），真实浏览器验证未做** |
 | M2 观察模式管理 | Java/Vue 只发现和展示，原桥与旧 job 仍唯一 owner | 不开额外调试口、不发任务、不重载、不争客户端 lease；准确展示 actual-state 和证据缺口 |
 | M3 内部认证与入口切换 | 经授权的受控维护窗口，封装现有 adapters，收敛旧外部入口 | Java-only 外部访问、adapter 拒绝未认证 loopback、精确 host/origin、单 lease；现有原生正常实例不被重启；若需重注入则等待批准，不后台强做 |
 | M4 原版页面与版本验收 | 独立访问状态/端口，不窃取现有 web 客户端 | 每 app/version 分别完成 SETUP/AUTH/TRANSPORT/RENDER，原版 DOM非 setup，允许记录非阻断 CSP/console 项；700+ startup burst、第二 tab 不伤第一 tab、慢客户端/断线清理通过 |
@@ -604,7 +605,7 @@ minimac-app-bridge/
 
 ### 14.8 扩展相关的里程碑补充
 
-- 在 M1 同步定义 Adapter Protocol v1、能力模型和 `adapter.yaml` 规范。
+- 在 M1 同步定义 Adapter Protocol v1、能力模型和 `adapter.yaml` 规范（已完成，见 `sdk/protocol/`）。
 - 在 M3 把千问、Codex 改造成符合规范的参考适配器，并以“两个应用无需改核心即可切换”为验收条件。
 - 新增 **M7 第三应用试接入**：用探测工具 + 骨架完成一个新应用的独立实例验证，核心代码零修改作为扩展性验收标准。
 
