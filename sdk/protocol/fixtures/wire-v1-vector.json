@@ -1,0 +1,15 @@
+{
+ "description": "Cross-language test vector for adapter wire v1 (HMAC-SHA256). Verified by Java WireAuthVectorTest and Node wire.test.mjs. Test-only key; never a real credential.",
+ "serviceKeyBase64": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA=",
+ "adapterNonce": "adapter-nonce-fixed",
+ "clientNonce": "client-nonce-fixed",
+ "instanceId": "mock-01",
+ "generation": 7,
+ "protocol": "1.0",
+ "platformProof": "ef88e508a5524166b56c7df76392228aa38ba9fedc80a8b724505b7f1108e9d7",
+ "adapterProof": "4ad2e0b22124b1c11a0b1eb4e08ff66dc3b6d5900314b97f649b6f574c40d48f",
+ "sessionKeyHex": "aaf407deef5939aef3404e89664efe2e6fb055a356b7f173d99eec01f8ecb043",
+ "frameDirection": "p2a",
+ "frameJson": "{\"n\":1,\"env\":{\"protocolVersion\":\"1.0\"}}",
+ "frameMac": "73040fadeb9d3846c51bbec82aa6f75aa2acee700157aa256d46993e65d5a831"
+}

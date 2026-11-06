@@ -22,13 +22,15 @@
   <packaging>pom</packaging>
 
   <name>MiniMacAppBridge (miniMac App 引桥)</name>
-  <description>Unified desktop app bridge platform - design skeleton, no bridge implementation.</description>
+  <description>Unified desktop app bridge platform - M1 offline protocol and security skeleton (mock adapters only).</description>
   <url>https://github.com/dipinllx-source/minimac-app-bridge</url>
 
   <properties>
     <java.version>21</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
     <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+    <!-- 测试会启动 Node mock 适配器进程（adapters/mock）；可用 -Dmmab.node=/path/to/node 指定 -->
+    <mmab.node>node</mmab.node>
   </properties>
 
   <modules>
@@ -37,6 +39,22 @@
   </modules>
 
   <build>
+    <pluginManagement>
+      <plugins>
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-surefire-plugin</artifactId>
+          <configuration>
+            <systemPropertyVariables>
+              <mmab.repo.root>${maven.multiModuleProjectDirectory}</mmab.repo.root>
+              <mmab.test.node>${mmab.node}</mmab.test.node>
+              <!-- 端到端测试要伪造 Host 头验证 DNS rebinding 防护 -->
+              <jdk.httpclient.allowRestrictedHeaders>host</jdk.httpclient.allowRestrictedHeaders>
+            </systemPropertyVariables>
+          </configuration>
+        </plugin>
+      </plugins>
+    </pluginManagement>
     <plugins>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

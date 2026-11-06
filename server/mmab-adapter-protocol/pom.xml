@@ -14,9 +14,14 @@
   <artifactId>mmab-adapter-protocol</artifactId>
   <packaging>jar</packaging>
   <name>mmab-adapter-protocol</name>
-  <description>MMAB Adapter Protocol v1 draft: envelope, error codes, capability states. No runtime dependencies.</description>
+  <description>MMAB Adapter Protocol v1: envelope, error codes, capability states, mmab-sv1 codec, adapter wire auth. Only depends on Jackson (tree model).</description>
 
   <dependencies>
+    <!-- 只用树模型做严格解析；不做 POJO / 多态反序列化。版本由 Spring Boot BOM 管理。 -->
+    <dependency>
+      <groupId>tools.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>

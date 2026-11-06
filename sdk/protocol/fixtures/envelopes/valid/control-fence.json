@@ -1,0 +1,15 @@
+{
+ "protocolVersion": "1.0",
+ "profileId": "mock/0.1.0",
+ "instanceId": "mock-01",
+ "processGeneration": 1,
+ "connectionId": "platform",
+ "leaseId": "none",
+ "fencingToken": 0,
+ "sequence": 0,
+ "messageKind": "CONTROL",
+ "operation": "mmab.fence",
+ "deadline": "2026-11-07T00:00:30Z",
+ "codecVersion": "mmab-sv1",
+ "payload": "{\"$t\":\"object\",\"v\":{\"text\":\"hi\"}}"
+}

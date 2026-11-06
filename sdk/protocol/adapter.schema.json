@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/dipinllx-source/minimac-app-bridge/sdk/protocol/adapter.schema.json",
-  "title": "MMAB adapter.yaml (draft, protocol v1)",
+  "title": "MMAB adapter.yaml (protocol v1)",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -28,13 +28,20 @@
       "type": "string",
       "minLength": 1
     },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9A-Za-z.+-]{1,32}$",
+      "description": "Adapter package version; profileId = appId/version."
+    },
     "strategy": {
       "enum": [
         "electron-main-inject",
         "electron-renderer-cdp",
         "local-web-proxy",
-        "official-remote-api"
-      ]
+        "official-remote-api",
+        "test-mock"
+      ],
+      "description": "test-mock is for offline tests only; the platform refuses it unless mmab.testing.allow-test-adapters=true."
     },
     "protocol": {
       "type": "object",
@@ -133,92 +140,37 @@
       "additionalProperties": false,
       "properties": {
         "ui.render": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         },
         "ui.history": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         },
         "ui.compose": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         },
         "stream.push": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         },
         "file.upload": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         },
         "file.drop": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         },
         "clipboard.write": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         },
         "clipboard.read": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         },
         "media.voice": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         },
         "app.git": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         },
         "app.extension": {
-          "enum": [
-            "SUPPORTED",
-            "UNVERIFIED",
-            "DISABLED",
-            "UNSUPPORTED"
-          ]
+          "$ref": "#/$defs/capabilityState"
         }
       }
     },
@@ -250,6 +202,80 @@
           "type": "string"
         }
       }
+    },
+    "operations": {
+      "type": "object",
+      "description": "Operation allowlist. Names must live in the adapter's namespace (appId without '-'); 'mmab.*' is reserved for the platform. Undeclared operations are rejected with UNKNOWN_OPERATION; operations whose capability is not SUPPORTED with CAPABILITY_DISABLED.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-zA-Z0-9-]*)+$",
+        "maxLength": 64,
+        "not": {
+          "pattern": "^mmab\\."
+        }
+      },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "capability",
+          "kind"
+        ],
+        "properties": {
+          "capability": {
+            "enum": [
+              "ui.render",
+              "ui.history",
+              "ui.compose",
+              "stream.push",
+              "file.upload",
+              "file.drop",
+              "clipboard.write",
+              "clipboard.read",
+              "media.voice",
+              "app.git",
+              "app.extension"
+            ]
+          },
+          "kind": {
+            "enum": [
+              "request",
+              "event"
+            ]
+          },
+          "coalescible": {
+            "type": "boolean",
+            "description": "Events only: state notification that may be coalesced when the outbound queue is under pressure."
+          }
+        },
+        "if": {
+          "properties": {
+            "coalescible": {
+              "const": true
+            }
+          },
+          "required": [
+            "coalescible"
+          ]
+        },
+        "then": {
+          "properties": {
+            "kind": {
+              "const": "event"
+            }
+          }
+        }
+      }
+    }
+  },
+  "description": "Descriptor of one adapter package (design §14.3). Java loader: instances/AdapterDescriptorLoader.",
+  "$defs": {
+    "capabilityState": {
+      "enum": [
+        "SUPPORTED",
+        "UNVERIFIED",
+        "DISABLED",
+        "UNSUPPORTED"
+      ]
     }
   }
 }

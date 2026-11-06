@@ -1,0 +1,500 @@
+{
+ "codecVersion": "mmab-sv1",
+ "description": "Shared contract fixtures for mmab-sv1. Java: StructuredCodecContractTest; JS: sdk/web/codec.test.mjs. 'encoded' is canonical: encode(decode(x)) must reproduce it exactly.",
+ "valid": [
+  {
+   "name": "null",
+   "encoded": null
+  },
+  {
+   "name": "true",
+   "encoded": true
+  },
+  {
+   "name": "false",
+   "encoded": false
+  },
+  {
+   "name": "string-unicode",
+   "encoded": "原版页面 \u0000 😀"
+  },
+  {
+   "name": "int",
+   "encoded": 42
+  },
+  {
+   "name": "negative-int",
+   "encoded": -7
+  },
+  {
+   "name": "float",
+   "encoded": 1.5
+  },
+  {
+   "name": "max-safe-integer",
+   "encoded": 9007199254740991
+  },
+  {
+   "name": "nan",
+   "encoded": {
+    "$t": "num",
+    "v": "NaN"
+   }
+  },
+  {
+   "name": "infinity",
+   "encoded": {
+    "$t": "num",
+    "v": "Infinity"
+   }
+  },
+  {
+   "name": "negative-infinity",
+   "encoded": {
+    "$t": "num",
+    "v": "-Infinity"
+   }
+  },
+  {
+   "name": "negative-zero",
+   "encoded": {
+    "$t": "num",
+    "v": "-0"
+   }
+  },
+  {
+   "name": "undefined",
+   "encoded": {
+    "$t": "undef"
+   }
+  },
+  {
+   "name": "bigint",
+   "encoded": {
+    "$t": "bigint",
+    "v": "12345678901234567890123"
+   }
+  },
+  {
+   "name": "bigint-negative",
+   "encoded": {
+    "$t": "bigint",
+    "v": "-1"
+   }
+  },
+  {
+   "name": "date",
+   "encoded": {
+    "$t": "date",
+    "v": 1762473600000
+   }
+  },
+  {
+   "name": "invalid-date",
+   "encoded": {
+    "$t": "date",
+    "v": null
+   }
+  },
+  {
+   "name": "uint8array",
+   "encoded": {
+    "$t": "bytes",
+    "k": "Uint8Array",
+    "v": "AQID"
+   }
+  },
+  {
+   "name": "empty-arraybuffer",
+   "encoded": {
+    "$t": "bytes",
+    "k": "ArrayBuffer",
+    "v": ""
+   }
+  },
+  {
+   "name": "float64array",
+   "encoded": {
+    "$t": "bytes",
+    "k": "Float64Array",
+    "v": "AAAAAAAA8D8="
+   }
+  },
+  {
+   "name": "int16array",
+   "encoded": {
+    "$t": "bytes",
+    "k": "Int16Array",
+    "v": "AQD//w=="
+   }
+  },
+  {
+   "name": "array-mixed",
+   "encoded": [
+    1,
+    "a",
+    null,
+    {
+     "$t": "undef"
+    },
+    [
+     true
+    ]
+   ]
+  },
+  {
+   "name": "object-nested",
+   "encoded": {
+    "$t": "object",
+    "v": {
+     "a": 1,
+     "b": {
+      "$t": "object",
+      "v": {
+       "c": [
+        true
+       ]
+      }
+     }
+    }
+   }
+  },
+  {
+   "name": "object-empty",
+   "encoded": {
+    "$t": "object",
+    "v": {}
+   }
+  },
+  {
+   "name": "object-with-tag-like-keys",
+   "encoded": {
+    "$t": "object",
+    "v": {
+     "$t": "date",
+     "v": "x"
+    }
+   }
+  },
+  {
+   "name": "map",
+   "encoded": {
+    "$t": "map",
+    "v": [
+     [
+      {
+       "$t": "object",
+       "v": {}
+      },
+      1
+     ],
+     [
+      "k",
+      {
+       "$t": "set",
+       "v": [
+        1,
+        2
+       ]
+      }
+     ]
+    ]
+   }
+  },
+  {
+   "name": "set-empty",
+   "encoded": {
+    "$t": "set",
+    "v": []
+   }
+  },
+  {
+   "name": "error",
+   "encoded": {
+    "$t": "error",
+    "name": "TypeError",
+    "message": "boom"
+   }
+  },
+  {
+   "name": "port",
+   "encoded": {
+    "$t": "port",
+    "id": "p-1"
+   }
+  },
+  {
+   "name": "depth-32",
+   "encoded": [
+    [
+     [
+      [
+       [
+        [
+         [
+          [
+           [
+            [
+             [
+              [
+               [
+                [
+                 [
+                  [
+                   [
+                    [
+                     [
+                      [
+                       [
+                        [
+                         [
+                          [
+                           [
+                            [
+                             [
+                              [
+                               [
+                                [
+                                 [
+                                  [
+                                   1
+                                  ]
+                                 ]
+                                ]
+                               ]
+                              ]
+                             ]
+                            ]
+                           ]
+                          ]
+                         ]
+                        ]
+                       ]
+                      ]
+                     ]
+                    ]
+                   ]
+                  ]
+                 ]
+                ]
+               ]
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ]
+  }
+ ],
+ "invalid": [
+  {
+   "name": "raw-object-without-tag",
+   "encoded": {
+    "a": 1
+   },
+   "error": "MALFORMED_FRAME"
+  },
+  {
+   "name": "unknown-tag",
+   "encoded": {
+    "$t": "regexp",
+    "v": "x"
+   },
+   "error": "CODEC_UNSUPPORTED"
+  },
+  {
+   "name": "proto-key",
+   "encoded": {
+    "$t": "object",
+    "v": {
+     "__proto__": {
+      "$t": "object",
+      "v": {
+       "polluted": true
+      }
+     }
+    }
+   },
+   "error": "CODEC_UNSUPPORTED"
+  },
+  {
+   "name": "constructor-key",
+   "encoded": {
+    "$t": "object",
+    "v": {
+     "constructor": 1
+    }
+   },
+   "error": "CODEC_UNSUPPORTED"
+  },
+  {
+   "name": "extra-key-in-tag",
+   "encoded": {
+    "$t": "undef",
+    "x": 1
+   },
+   "error": "MALFORMED_FRAME"
+  },
+  {
+   "name": "bigint-leading-zero",
+   "encoded": {
+    "$t": "bigint",
+    "v": "01"
+   },
+   "error": "MALFORMED_FRAME"
+  },
+  {
+   "name": "bytes-unaligned",
+   "encoded": {
+    "$t": "bytes",
+    "k": "Int32Array",
+    "v": "AQID"
+   },
+   "error": "MALFORMED_FRAME"
+  },
+  {
+   "name": "bytes-dataview-unsupported",
+   "encoded": {
+    "$t": "bytes",
+    "k": "DataView",
+    "v": ""
+   },
+   "error": "CODEC_UNSUPPORTED"
+  },
+  {
+   "name": "bytes-bad-base64",
+   "encoded": {
+    "$t": "bytes",
+    "k": "Uint8Array",
+    "v": "!!"
+   },
+   "error": "MALFORMED_FRAME"
+  },
+  {
+   "name": "map-entry-arity",
+   "encoded": {
+    "$t": "map",
+    "v": [
+     [
+      1
+     ]
+    ]
+   },
+   "error": "MALFORMED_FRAME"
+  },
+  {
+   "name": "error-unknown-name",
+   "encoded": {
+    "$t": "error",
+    "name": "MyError",
+    "message": ""
+   },
+   "error": "MALFORMED_FRAME"
+  },
+  {
+   "name": "special-number-unknown",
+   "encoded": {
+    "$t": "num",
+    "v": "1e999"
+   },
+   "error": "MALFORMED_FRAME"
+  },
+  {
+   "name": "port-bad-id",
+   "encoded": {
+    "$t": "port",
+    "id": "../x"
+   },
+   "error": "MALFORMED_FRAME"
+  },
+  {
+   "name": "depth-33",
+   "encoded": [
+    [
+     [
+      [
+       [
+        [
+         [
+          [
+           [
+            [
+             [
+              [
+               [
+                [
+                 [
+                  [
+                   [
+                    [
+                     [
+                      [
+                       [
+                        [
+                         [
+                          [
+                           [
+                            [
+                             [
+                              [
+                               [
+                                [
+                                 [
+                                  [
+                                   [
+                                    1
+                                   ]
+                                  ]
+                                 ]
+                                ]
+                               ]
+                              ]
+                             ]
+                            ]
+                           ]
+                          ]
+                         ]
+                        ]
+                       ]
+                      ]
+                     ]
+                    ]
+                   ]
+                  ]
+                 ]
+                ]
+               ]
+              ]
+             ]
+            ]
+           ]
+          ]
+         ]
+        ]
+       ]
+      ]
+     ]
+    ]
+   ],
+   "error": "CODEC_UNSUPPORTED"
+  },
+  {
+   "name": "duplicate-key",
+   "encodedText": "{\"$t\":\"undef\",\"$t\":\"undef\"}",
+   "error": "MALFORMED_FRAME",
+   "javaOnly": true,
+   "note": "JSON.parse keeps the last duplicate; the Java gateway rejects it before forwarding."
+  },
+  {
+   "name": "trailing-garbage",
+   "encodedText": "1 2",
+   "error": "MALFORMED_FRAME"
+  }
+ ]
+}

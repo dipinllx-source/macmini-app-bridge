@@ -1,0 +1,15 @@
+{
+ "protocolVersion": "1.0",
+ "profileId": "mock/0.1.0",
+ "instanceId": "mock-01",
+ "processGeneration": 1,
+ "connectionId": "c-7f3a",
+ "leaseId": "l-1",
+ "fencingToken": 3,
+ "sequence": 5,
+ "correlationId": "c-7f3a/1",
+ "messageKind": "REQUEST",
+ "deadline": "2026-11-07T00:00:30Z",
+ "codecVersion": "mmab-sv1",
+ "payload": "{\"$t\":\"object\",\"v\":{\"text\":\"hi\"}}"
+}

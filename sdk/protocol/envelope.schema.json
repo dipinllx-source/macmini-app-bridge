@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/dipinllx-source/minimac-app-bridge/sdk/protocol/envelope.schema.json",
-  "title": "MMAB data-plane envelope (draft, protocol v1)",
-  "description": "Mirrors server/mmab-adapter-protocol Envelope. payload is opaque, encoded by the profile codec.",
+  "title": "MMAB Adapter Protocol v1 envelope",
+  "description": "Mirrors server/mmab-adapter-protocol Envelope / EnvelopeJson (contract-tested). payload is opaque text encoded by the profile codec (mmab-sv1 by default).",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -25,43 +25,46 @@
       "pattern": "^\\d+\\.\\d+$"
     },
     "profileId": {
-      "type": "string",
-      "minLength": 1
+      "$ref": "#/$defs/id"
     },
     "instanceId": {
-      "type": "string",
-      "minLength": 1
+      "$ref": "#/$defs/id"
     },
     "processGeneration": {
-      "type": "integer",
-      "minimum": 0
+      "$ref": "#/$defs/counter"
     },
     "connectionId": {
-      "type": "string",
-      "minLength": 1
+      "$ref": "#/$defs/id",
+      "description": "Browser connection id (new on every reconnect); 'platform' for platform<->adapter control frames."
     },
     "leaseId": {
-      "type": "string",
-      "minLength": 1
+      "$ref": "#/$defs/id",
+      "description": "Current exclusive lease; 'none' when no lease is active."
     },
     "fencingToken": {
-      "type": "integer",
-      "minimum": 0
+      "$ref": "#/$defs/counter"
     },
     "streamId": {
-      "type": [
-        "string",
-        "null"
+      "oneOf": [
+        {
+          "$ref": "#/$defs/id"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "sequence": {
-      "type": "integer",
-      "minimum": 0
+      "$ref": "#/$defs/counter"
     },
     "correlationId": {
-      "type": [
-        "string",
-        "null"
+      "oneOf": [
+        {
+          "$ref": "#/$defs/id"
+        },
+        {
+          "type": "null"
+        }
       ]
     },
     "messageKind": {
@@ -78,6 +81,11 @@
         "CONTROL"
       ]
     },
+    "operation": {
+      "type": "string",
+      "maxLength": 64,
+      "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-zA-Z0-9-]*)+$"
+    },
     "deadline": {
       "type": "string",
       "format": "date-time"
@@ -87,25 +95,125 @@
       "minLength": 1
     },
     "payload": {
-      "type": "string"
-    }
-  },
-  "if": {
-    "properties": {
-      "messageKind": {
-        "const": "RESPONSE"
+      "type": "string",
+      "description": "Opaque codec text. Frame budget (whole JSON text) is 1 MiB."
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code"
+      ],
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/errorCode"
+        },
+        "message": {
+          "type": "string"
+        }
       }
     }
   },
-  "then": {
-    "required": [
-      "correlationId"
-    ],
-    "properties": {
-      "correlationId": {
-        "type": "string",
-        "minLength": 1
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "messageKind": {
+            "enum": [
+              "REQUEST",
+              "RESPONSE"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "correlationId"
+        ],
+        "properties": {
+          "correlationId": {
+            "$ref": "#/$defs/id"
+          }
+        }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "messageKind": {
+            "enum": [
+              "REQUEST",
+              "CONTROL"
+            ]
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "operation"
+        ]
+      }
+    },
+    {
+      "if": {
+        "required": [
+          "error"
+        ]
+      },
+      "then": {
+        "properties": {
+          "messageKind": {
+            "enum": [
+              "RESPONSE",
+              "CONTROL",
+              "PORT_ERROR"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$"
+    },
+    "counter": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "errorCode": {
+      "enum": [
+        "COMPATIBILITY_BLOCKED",
+        "PORT_OWNER_MISMATCH",
+        "WAIT_CONFIRM",
+        "LEASE_OCCUPIED",
+        "STALE_GENERATION",
+        "CODEC_UNSUPPORTED",
+        "QUEUE_LIMIT",
+        "INSPECTOR_CLEANUP_FAILED",
+        "PROTOCOL_VERSION_UNSUPPORTED",
+        "UNAUTHENTICATED",
+        "ORIGIN_REJECTED",
+        "UNKNOWN_OPERATION",
+        "CAPABILITY_DISABLED",
+        "DEADLINE_EXCEEDED",
+        "BLOCKED_UPGRADE",
+        "MALFORMED_FRAME",
+        "LEASE_REQUIRED",
+        "CSRF_REJECTED",
+        "FETCH_SITE_REJECTED",
+        "HOST_REJECTED",
+        "TICKET_REJECTED",
+        "REPLAY_REJECTED",
+        "ADAPTER_UNAVAILABLE",
+        "PORT_STATE",
+        "RATE_LIMITED",
+        "SETUP_REQUIRED",
+        "NOT_FOUND",
+        "METHOD_NOT_ALLOWED"
+      ]
     }
   }
 }

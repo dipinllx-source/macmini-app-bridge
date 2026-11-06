@@ -11,7 +11,12 @@ public enum StrategyFamily {
     /** S3：应用自带本地 Web UI，仅需鉴权代理。 */
     S3_LOCAL_WEB_PROXY("local-web-proxy"),
     /** S4：应用官方远控 / 服务接口 + 平台提供前端。 */
-    S4_OFFICIAL_REMOTE_API("official-remote-api");
+    S4_OFFICIAL_REMOTE_API("official-remote-api"),
+    /**
+     * 仅限离线测试的 mock 适配器（M1）。不是可上线的策略族：平台只有在显式配置
+     * {@code mmab.allow-test-adapters=true} 时才会启动它。
+     */
+    TEST_MOCK("test-mock");
 
     private final String id;
 
@@ -21,5 +26,9 @@ public enum StrategyFamily {
 
     public String id() {
         return id;
+    }
+
+    public static java.util.Optional<StrategyFamily> fromId(String id) {
+        return java.util.Arrays.stream(values()).filter(s -> s.id.equals(id)).findFirst();
     }
 }
