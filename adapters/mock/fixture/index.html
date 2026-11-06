@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>Mock 原版页面（M1 fixture）</title>
+</head>
+<body>
+  <!-- 固定 fixture：扮演"应用自己的原版页面"。它只调用 window.mmab（由平台注入的 shim 提供），不知道票据、Cookie 或租约。 -->
+  <h1>Mock 原版页面</h1>
+  <p id="status" data-state="loading">连接中…</p>
+  <pre id="result"></pre>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

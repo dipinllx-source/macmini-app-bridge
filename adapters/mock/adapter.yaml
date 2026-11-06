@@ -1,0 +1,44 @@
+# MMAB adapter descriptor - mock（M1 离线测试专用）
+# 不连接任何真实应用。strategy=test-mock 只有在 mmab.testing.allow-test-adapters=true 时才会被平台启动。
+# 能力状态描述的是 mock 自身在 M1 自动化测试中的证据，不代表任何真实应用。
+schemaVersion: 1
+appId: mock
+displayName: Mock（离线测试）
+version: 0.1.0
+strategy: test-mock
+protocol: { min: "1.0", max: "1.0" }
+app:
+  bundleId: none.offline.mock
+  executableAllowlist: [none]
+  versionSource: custom
+permissions:
+  launchArguments: false
+  temporaryInspector: false
+  persistentCdp: false
+  fileUploadDir: false
+risk:
+  level: low
+  notes:
+    - 仅用于离线协议与安全测试；不接触任何应用、账号或本机文件
+capabilities:
+  ui.render: SUPPORTED       # mock.echo / mock.add：OfflineEndToEndTest 端到端通过
+  ui.history: UNSUPPORTED
+  ui.compose: DISABLED       # 故意关闭：用来证明网关拒绝能力未开启的操作
+  stream.push: SUPPORTED     # mock.burst 推送 mock.chunk / mock.tick
+  file.upload: UNSUPPORTED
+  file.drop: UNSUPPORTED
+  clipboard.write: UNSUPPORTED
+  clipboard.read: UNSUPPORTED
+  media.voice: UNSUPPORTED
+  app.git: UNSUPPORTED
+  app.extension: UNSUPPORTED
+operations:
+  mock.echo: { capability: ui.render, kind: request }
+  mock.add: { capability: ui.render, kind: request }
+  mock.slow: { capability: ui.render, kind: request }
+  mock.burst: { capability: stream.push, kind: request }
+  mock.chunk: { capability: stream.push, kind: event }
+  mock.tick: { capability: stream.push, kind: event, coalescible: true }
+  mock.compose: { capability: ui.compose, kind: request }
+resources:
+  source: adapter-bundled
