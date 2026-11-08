@@ -1,6 +1,6 @@
 # console
 
-miniMac App 引桥 控制台（Vue 3 + TypeScript + Vite + Pinia + Vue Router + Element Plus）。
+macmini App 引桥 控制台（Vue 3 + TypeScript + Vite + Pinia + Vue Router + Element Plus）。
 
 M1 状态：
 

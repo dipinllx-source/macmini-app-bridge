@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "MiniMacAppBridge (miniMac App 引桥) management console - skeleton with mock data",
+  "description": "MacminiAppBridge (macmini App 引桥) management console - skeleton with mock data",
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
   },

@@ -21,9 +21,9 @@
   <version>0.1.0-SNAPSHOT</version>
   <packaging>pom</packaging>
 
-  <name>MiniMacAppBridge (miniMac App 引桥)</name>
+  <name>MacminiAppBridge (macmini App 引桥)</name>
   <description>Unified desktop app bridge platform - M1 offline protocol and security skeleton (mock adapters only).</description>
-  <url>https://github.com/dipinllx-source/minimac-app-bridge</url>
+  <url>https://github.com/dipinllx-source/macmini-app-bridge</url>
 
   <properties>
     <java.version>21</java.version>

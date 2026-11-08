@@ -1,4 +1,4 @@
-# MiniMacAppBridge · miniMac App 引桥
+# MacminiAppBridge · macmini App 引桥
 
 把 Mac 上只能本机使用的桌面应用（Electron 等），以**原版界面**的形式安全地开放给可信内网中的浏览器使用。
 

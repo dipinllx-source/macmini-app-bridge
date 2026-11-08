@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/dipinllx-source/minimac-app-bridge/sdk/protocol/envelope.schema.json",
+  "$id": "https://github.com/dipinllx-source/macmini-app-bridge/sdk/protocol/envelope.schema.json",
   "title": "MMAB Adapter Protocol v1 envelope",
   "description": "Mirrors server/mmab-adapter-protocol Envelope / EnvelopeJson (contract-tested). payload is opaque text encoded by the profile codec (mmab-sv1 by default).",
   "type": "object",

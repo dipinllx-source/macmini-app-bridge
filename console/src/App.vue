@@ -11,7 +11,7 @@ onMounted(async () => {
 <template>
   <el-container class="layout">
     <el-aside width="200px" class="aside">
-      <div class="brand">miniMac App 引桥</div>
+      <div class="brand">macmini App 引桥</div>
       <el-menu router :default-active="$route.path">
         <el-menu-item index="/">应用总览</el-menu-item>
         <el-menu-item index="/launch">开窗（M1）</el-menu-item>

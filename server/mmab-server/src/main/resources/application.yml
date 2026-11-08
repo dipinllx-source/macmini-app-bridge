@@ -1,4 +1,4 @@
-# MiniMacAppBridge (miniMac App 引桥) - mmab-server
+# MacminiAppBridge (macmini App 引桥) - mmab-server
 # M1：离线协议与安全骨架。默认配置不启动任何适配器、不连接任何真实应用；只监听回环地址。
 # 端口均为设计文档 §5.1 的建议值，部署时在此确定；实例与端口静态绑定。
 

@@ -1,4 +1,4 @@
-# MiniMacAppBridge（miniMac App 引桥）：统一桌面应用桥接平台架构设计
+# MacminiAppBridge（macmini App 引桥）：统一桌面应用桥接平台架构设计
 
 > 平台名称见第 15 节；扩展能力见第 14 节。千问、Codex 是首批两个接入应用，不是平台边界。
 >
@@ -371,7 +371,7 @@ App-specific 实现保留 Qwen ipcMain/sendSync/trpc/主窗口镜像和 Codex re
 ### 10.4 建议仓库目录（已被 14.7 取代）
 
 ```text
-minimac-app-bridge/
+macmini-app-bridge/
   server/                  # Spring modular monolith
     identity/ instances/ lifecycle/ leases/ proxy/ audit/ persistence/
   console/                 # Vue3 TS, management UI only
@@ -586,7 +586,7 @@ adapters/<app-id>/
 第 10.4 节目录相应调整为：
 
 ```text
-minimac-app-bridge/
+macmini-app-bridge/
   server/                 # Java 核心
   console/                # Vue 控制台
   sdk/
@@ -613,18 +613,18 @@ minimac-app-bridge/
 
 **正式名称（2026-11-07 确定）**
 
-- 英文：**MiniMacAppBridge**
-- 中文：**miniMac App 引桥**
+- 英文：**MacminiAppBridge**
+- 中文：**macmini App 引桥**
 
 含义：引桥是把车辆从地面道路引上主桥的那一段。这里把 Mac 上只能本机使用的桌面应用，引到浏览器这条“主路”上；应用本身不改、不重写，平台只负责接入、鉴权和通道。名称中的 Mac 与当前部署范围一致（单台 Mac 宿主）；将来若扩展到其他系统宿主，品牌名可保持不变，宿主类型在 Host 实体中区分。
 
 | 用途 | 命名 |
 |---|---|
-| 仓库 / 目录 | `minimac-app-bridge` |
-| Java 包名 | `*.minimacappbridge.*`（全小写，Java 包名约定） |
+| 仓库 / 目录 | `macmini-app-bridge` |
+| Java 包名 | `*.macminiappbridge.*`（全小写，Java 包名约定） |
 | 简称（日志前缀、配置键、指标前缀） | `mmab`，例如配置 `mmab.server.port`、日志 `[mmab]` |
 | Maven 坐标 | `artifactId`：`mmab-server`、`mmab-adapter-sdk` 等 |
-| 控制台 | miniMac App 引桥 控制台（MMAB Console） |
+| 控制台 | macmini App 引桥 控制台（MMAB Console） |
 | 适配器 / SDK / 协议 | MMAB Adapter、MMAB Adapter SDK、MMAB Adapter Protocol |
 | 访问地址示例 | 控制台 `https://<LAN-IP>:8443/`，千问 `:8444`，Codex `:8445`，新应用 `:8446-8459`；平台保留路径前缀 `/__mmab/` |
 

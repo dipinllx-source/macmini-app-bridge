@@ -73,7 +73,7 @@ async function connect() {
       }
       for (const fn of set) fn(value);
     } else if (frame.kind === 'ERROR') {
-      banner(`miniMac App 引桥：${frame.error?.code ?? 'ERROR'}`);
+      banner(`macmini App 引桥：${frame.error?.code ?? 'ERROR'}`);
     }
   });
   ws.addEventListener('close', (ev) => {
@@ -81,7 +81,7 @@ async function connect() {
     for (const p of pending.values()) p.reject(new BridgeError(closedReason));
     pending.clear();
     clearInterval(timer);
-    banner(`miniMac App 引桥连接已断开（${closedReason}），请回到控制台重新打开。`);
+    banner(`macmini App 引桥连接已断开（${closedReason}），请回到控制台重新打开。`);
   });
   const timer = setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ kind: 'HEARTBEAT' }));
@@ -90,7 +90,7 @@ async function connect() {
 }
 
 const ready = connect().catch((e) => {
-  banner(`miniMac App 引桥未连接（${e?.code ?? e?.message ?? e}）`);
+  banner(`macmini App 引桥未连接（${e?.code ?? e?.message ?? e}）`);
   throw e;
 });
 ready.catch(() => {});
