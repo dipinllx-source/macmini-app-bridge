@@ -1,10 +1,16 @@
 package io.github.dipinllx.macminiappbridge.config;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.boot.context.properties.bind.ConstructorBinding;
 
 /**
  * {@code mmab.*} 配置（设计文档 §5.1、§15）。实例与端口静态绑定；端口冲突在启动时拒绝，
@@ -19,11 +25,26 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * @param operator  平台操作者
  * @param testing   仅测试使用的开关
  * @param home      仓库 / 安装根目录，适配器与资源相对路径以此为基准
+ * @param dataDir   用户数据目录（运行时从本机 App 包提取的原版资源、适配器状态）；不在仓库内、不进 Git。
+ *                  {@code mmab.adapters[].resources} 以 {@code data:} 开头时相对此目录解析
  */
 @ConfigurationProperties(prefix = "mmab")
 public record MmabProperties(Platform platform, Console console, List<Instance> instances, Web web,
-        Timeouts timeouts, List<AdapterPackage> adapters, Operator operator, Testing testing, String home) {
+        Timeouts timeouts, List<AdapterPackage> adapters, Operator operator, Testing testing, String home,
+        String dataDir) {
 
+    /** 精确 IPv4 字面量。 */
+    static final Pattern IPV4 = Pattern.compile("^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$");
+    /** IPv6 字面量（不带方括号、不带 zone）。 */
+    static final Pattern IPV6 = Pattern.compile("^[0-9A-Fa-f:.]{2,45}$");
+
+    /** M1 兼容构造器（无 dataDir）。 */
+    public MmabProperties(Platform platform, Console console, List<Instance> instances, Web web, Timeouts timeouts,
+            List<AdapterPackage> adapters, Operator operator, Testing testing, String home) {
+        this(platform, console, instances, web, timeouts, adapters, operator, testing, home, null);
+    }
+
+    @ConstructorBinding
     public MmabProperties {
         platform = platform != null ? platform : new Platform("unknown");
         console = console != null ? console : new Console(8443, "127.0.0.1");
@@ -34,6 +55,9 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
         operator = operator != null ? operator : new Operator(null);
         testing = testing != null ? testing : new Testing(false, false);
         home = home == null || home.isBlank() ? "." : home;
+        dataDir = dataDir == null || dataDir.isBlank()
+                ? System.getProperty("user.home") + "/Library/Application Support/MacminiAppBridge" : dataDir;
+        syncPublicHosts(console, web);
 
         Set<Integer> ports = new HashSet<>();
         if (console.port() != 0) {
@@ -57,9 +81,65 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
         }
     }
 
-    /** 公开地址列表（用于 Host / Origin 精确匹配），默认只有绑定地址。 */
+    /** 公开地址列表（用于 Host / Origin 精确匹配），默认等于全部绑定地址（IPv6 带方括号）。 */
     public List<String> publicHosts() {
-        return web.publicHosts().isEmpty() ? List.of(console.bindAddress()) : web.publicHosts();
+        return web.publicHosts().isEmpty() ? console.bindAddresses().stream().map(MmabProperties::hostForm).toList()
+                : web.publicHosts();
+    }
+
+    /**
+     * 设计 §5.1：监听只绑精确 LAN IP 与 127.0.0.1，Host / Origin 精确匹配。两者必须同步：
+     * 每个绑定地址都必须出现在 public-hosts 中（否则从该地址来的请求全被拒，配置自相矛盾）；
+     * public-hosts 中的每个 IP 字面量都必须是绑定地址（否则平台会接受一个自己并不监听的 Origin）。
+     */
+    private static void syncPublicHosts(Console console, Web web) {
+        if (web.publicHosts().isEmpty()) {
+            return;
+        }
+        Set<String> bound = new HashSet<>();
+        for (String a : console.bindAddresses()) {
+            bound.add(normalizeLiteral(a));
+        }
+        Set<String> listed = new HashSet<>();
+        for (String h : web.publicHosts()) {
+            String literal = literalOf(h);
+            if (literal == null) {
+                continue; // 主机名（例如将来的内网 DNS 名）不参与地址同步
+            }
+            String n = normalizeLiteral(literal);
+            if (!bound.contains(n)) {
+                throw new IllegalArgumentException("mmab.web.public-hosts lists an address that is not a bind address");
+            }
+            listed.add(n);
+        }
+        if (!listed.containsAll(bound)) {
+            throw new IllegalArgumentException("mmab.web.public-hosts must include every bind address");
+        }
+    }
+
+    /** 若 public host 是 IP 字面量（IPv4 或 [IPv6]），返回去掉方括号的字面量；主机名返回 null。 */
+    public static String literalOf(String publicHost) {
+        if (publicHost.startsWith("[") && publicHost.endsWith("]")) {
+            return publicHost.substring(1, publicHost.length() - 1);
+        }
+        return IPV4.matcher(publicHost).matches() ? publicHost : null;
+    }
+
+    /** 绑定地址 → Host / Origin 中的写法（IPv6 加方括号）。 */
+    public static String hostForm(String bindAddress) {
+        return bindAddress.contains(":") ? "[" + bindAddress + "]" : bindAddress;
+    }
+
+    /** IP 字面量规范化（不做 DNS 解析：调用前已用正则确认是字面量）。 */
+    public static String normalizeLiteral(String literal) {
+        if (!IPV4.matcher(literal).matches() && !IPV6.matcher(literal).matches()) {
+            throw new IllegalArgumentException("not an IP literal");
+        }
+        try {
+            return InetAddress.getByName(literal).getHostAddress();
+        } catch (UnknownHostException e) {
+            throw new IllegalArgumentException("not an IP literal", e);
+        }
     }
 
     /** @param version 构建版本 */
@@ -67,18 +147,75 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
     }
 
     /**
-     * @param port        控制台 HTTPS 端口（建议 8443）
-     * @param bindAddress 精确绑定地址；不得为 0.0.0.0（所有实例监听同样绑定此地址）
+     * 监听地址（设计 §5.1）：控制台与每个实例端口都绑定 {@code bindAddresses} 中的每个精确地址，
+     * 典型值为 {@code [<LAN IP>, 127.0.0.1]}；绝不允许通配地址。
+     *
+     * @param port          控制台 HTTPS 端口（建议 8443）
+     * @param bindAddress   M1 单地址写法；{@code bindAddresses} 为空时使用
+     * @param bindAddresses 精确地址列表（IP 字面量，第一个为主地址）；非空时优先于 {@code bindAddress}
      */
-    public record Console(int port, String bindAddress) {
+    public record Console(int port, String bindAddress, List<String> bindAddresses) {
+
+        /** M1 兼容构造器：单一绑定地址。 */
+        public Console(int port, String bindAddress) {
+            this(port, bindAddress, null);
+        }
+
+        @ConstructorBinding
         public Console {
             requirePort(port, "mmab.console.port");
             if (bindAddress == null || bindAddress.isBlank()) {
                 bindAddress = "127.0.0.1";
             }
-            if ("0.0.0.0".equals(bindAddress) || "::".equals(bindAddress) || "*".equals(bindAddress)) {
+            List<String> raw = bindAddresses == null || bindAddresses.isEmpty() ? List.of(bindAddress) : bindAddresses;
+            Set<String> seen = new LinkedHashSet<>();
+            List<String> exact = new ArrayList<>();
+            for (String a : raw) {
+                String n = exactAddress(a);
+                if (!seen.add(n)) {
+                    throw new IllegalArgumentException("duplicate mmab.console.bind-addresses entry");
+                }
+                exact.add(a.trim());
+            }
+            bindAddresses = List.copyOf(exact);
+            bindAddress = bindAddresses.get(0);
+        }
+
+        /** 是否全部为回环地址（只有这时才允许明文 HTTP）。 */
+        public boolean allLoopback() {
+            return bindAddresses.stream().allMatch(a -> {
+                try {
+                    return InetAddress.getByName(a).isLoopbackAddress();
+                } catch (UnknownHostException e) {
+                    return false;
+                }
+            });
+        }
+
+        private static String exactAddress(String a) {
+            if (a == null || a.isBlank()) {
+                throw new IllegalArgumentException("mmab.console.bind-addresses entry must not be blank");
+            }
+            String t = a.trim();
+            if ("*".equals(t) || "0.0.0.0".equals(t) || "::".equals(t)) {
                 throw new IllegalArgumentException("mmab.console.bind-address must be an exact address, not a wildcard");
             }
+            String n;
+            try {
+                n = normalizeLiteral(t);
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("mmab.console.bind-addresses entries must be IP literals", e);
+            }
+            try {
+                InetAddress addr = InetAddress.getByName(n);
+                if (addr.isAnyLocalAddress() || addr.isMulticastAddress()) {
+                    throw new IllegalArgumentException(
+                            "mmab.console.bind-address must be an exact address, not a wildcard");
+                }
+            } catch (UnknownHostException e) {
+                throw new IllegalArgumentException("unresolvable bind address", e);
+            }
+            return n;
         }
     }
 
@@ -89,13 +226,24 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
      * @param port        静态绑定端口（建议 8444-8459）
      * @param strategy    策略族 ID（须与 adapter.yaml 一致）
      * @param enabled     是否开监听并启动适配器
+     * @param verifyCapabilities 操作者为验证 / 切换窗口显式开启的能力 ID（ADR-0005）：只能是 adapter.yaml 中
+     *                    状态为 SUPPORTED、但平台路径尚无 live 证据的能力；启动时写审计
      */
-    public record Instance(String id, String appId, String displayName, int port, String strategy, boolean enabled) {
+    public record Instance(String id, String appId, String displayName, int port, String strategy, boolean enabled,
+            List<String> verifyCapabilities) {
+
+        /** M1 兼容构造器。 */
+        public Instance(String id, String appId, String displayName, int port, String strategy, boolean enabled) {
+            this(id, appId, displayName, port, strategy, enabled, null);
+        }
+
+        @ConstructorBinding
         public Instance {
             if (id == null || !id.matches("[a-z0-9][a-z0-9-]{0,31}")) {
                 throw new IllegalArgumentException("invalid mmab instance id: " + id);
             }
             requirePort(port, "mmab.instances[" + id + "].port");
+            verifyCapabilities = verifyCapabilities == null ? List.of() : List.copyOf(verifyCapabilities);
         }
     }
 
@@ -109,7 +257,7 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
         public Web {
             publicHosts = publicHosts != null ? List.copyOf(publicHosts) : List.of();
             for (String h : publicHosts) {
-                if (h == null || !h.matches("[A-Za-z0-9.-]{1,253}")) {
+                if (h == null || !(h.matches("[A-Za-z0-9.-]{1,253}") || h.matches("\\[[0-9A-Fa-f:.]{2,45}\\]"))) {
                     throw new IllegalArgumentException("invalid mmab.web.public-hosts entry");
                 }
             }
@@ -143,7 +291,8 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
      * @param appId      对应 adapter.yaml 的 appId
      * @param descriptor adapter.yaml 路径（相对 home）
      * @param command    适配器进程命令（静态白名单；不接受 API 输入）
-     * @param resources  原版资源 / fixture 目录（相对 home）；adapter-bundled 时由平台直接提供
+     * @param resources  原版资源 / fixture 目录：相对 home；以 {@code data:} 开头时相对 {@code mmab.data-dir}
+     *                   （运行时从本机 App 包提取的原版资源，绝不入库）
      */
     public record AdapterPackage(String appId, String descriptor, List<String> command, String resources) {
         public AdapterPackage {

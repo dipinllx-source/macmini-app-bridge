@@ -27,6 +27,11 @@ final class TestTls {
     }
 
     static TestTls create() throws Exception {
+        return create("ip:127.0.0.1");
+    }
+
+    /** @param san keytool SAN 扩展值，例如 {@code ip:127.0.0.1,ip:::1} */
+    static TestTls create(String san) throws Exception {
         Path dir = Path.of("target", "test-tls").toAbsolutePath();
         Files.createDirectories(dir);
         Path ks = dir.resolve("mmab-test-" + UUID.randomUUID() + ".p12");
@@ -34,7 +39,7 @@ final class TestTls {
         Path keytool = Path.of(System.getProperty("java.home"), "bin", "keytool");
         Process p = new ProcessBuilder(List.of(keytool.toString(), "-genkeypair", "-alias", "mmab",
                 "-keyalg", "EC", "-groupname", "secp256r1", "-sigalg", "SHA256withECDSA",
-                "-dname", "CN=mmab-offline-test", "-ext", "san=ip:127.0.0.1", "-validity", "2",
+                "-dname", "CN=mmab-offline-test", "-ext", "san=" + san, "-validity", "2",
                 "-storetype", "PKCS12", "-keystore", ks.toString(), "-storepass", pw))
                 .redirectErrorStream(true).start();
         p.getInputStream().readAllBytes();

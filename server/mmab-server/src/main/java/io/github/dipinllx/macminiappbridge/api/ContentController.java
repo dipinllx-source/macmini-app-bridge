@@ -1,6 +1,7 @@
 package io.github.dipinllx.macminiappbridge.api;
 
 import io.github.dipinllx.macminiappbridge.config.MmabProperties;
+import io.github.dipinllx.macminiappbridge.instances.AdapterDescriptor;
 import io.github.dipinllx.macminiappbridge.instances.InstanceRegistry;
 import io.github.dipinllx.macminiappbridge.instances.InstanceRuntime;
 import io.github.dipinllx.macminiappbridge.protocol.ErrorCode;
@@ -11,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
 import org.springframework.http.CacheControl;
@@ -33,15 +35,28 @@ import reactor.core.scheduler.Schedulers;
 public class ContentController {
 
     static final String SHIM_TAG = "<script type=\"module\" src=\"/__mmab/shim/shim.mjs\"></script>";
-    private static final long MAX_FILE_BYTES = 16L * 1024 * 1024;
+    private static final long MAX_FILE_BYTES = 32L * 1024 * 1024;
+
+    /** 原版前端常见的其他静态类型（M3：真实应用资源）；未知类型仍为 octet-stream + nosniff。 */
+    private static final java.util.Map<String, String> EXTRA_TYPES = java.util.Map.ofEntries(
+            java.util.Map.entry("wasm", "application/wasm"), java.util.Map.entry("webp", "image/webp"),
+            java.util.Map.entry("jpg", "image/jpeg"), java.util.Map.entry("jpeg", "image/jpeg"),
+            java.util.Map.entry("gif", "image/gif"), java.util.Map.entry("woff", "font/woff"),
+            java.util.Map.entry("ttf", "font/ttf"), java.util.Map.entry("otf", "font/otf"),
+            java.util.Map.entry("mp3", "audio/mpeg"), java.util.Map.entry("wav", "audio/wav"), java.util.Map.entry("ogg", "audio/ogg"),
+            java.util.Map.entry("mp4", "video/mp4"), java.util.Map.entry("webm", "video/webm"),
+            java.util.Map.entry("txt", "text/plain;charset=UTF-8"), java.util.Map.entry("map", "application/json"),
+            java.util.Map.entry("webmanifest", "application/manifest+json"), java.util.Map.entry("avif", "image/avif"));
 
     private final InstanceRegistry instances;
+    private final ListenerRegistry listeners;
     private final Path home;
     private final Path consoleRoot;
     private final Path sdkRoot;
 
-    public ContentController(InstanceRegistry instances, MmabProperties properties) {
+    public ContentController(InstanceRegistry instances, MmabProperties properties, ListenerRegistry listeners) {
         this.instances = instances;
+        this.listeners = listeners;
         this.home = Path.of(properties.home()).toAbsolutePath().normalize();
         this.consoleRoot = properties.web().consoleStaticDir() == null ? null
                 : home.resolve(properties.web().consoleStaticDir()).normalize();
@@ -52,7 +67,10 @@ public class ContentController {
     public Mono<ResponseEntity<byte[]>> serve(ServerWebExchange ex) {
         ListenerRegistry.Role role = Requests.role(ex);
         String path = ex.getRequest().getPath().pathWithinApplication().value();
-        return Mono.fromCallable(() -> role.console() ? console(path) : instance(role.instanceId(), path))
+        // Host 已由 GuardFilter 精确校验（登记主机 + 本端口 + 本地到达地址）
+        String bridgeOrigin = listeners.scheme().replace("http", "ws") + "://"
+                + ex.getRequest().getHeaders().getFirst(org.springframework.http.HttpHeaders.HOST);
+        return Mono.fromCallable(() -> role.console() ? console(path) : instance(role.instanceId(), path, bridgeOrigin))
                 .subscribeOn(Schedulers.boundedElastic());
     }
 
@@ -71,20 +89,28 @@ public class ContentController {
         return file.map(this::read).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
     }
 
-    private ResponseEntity<byte[]> instance(String instanceId, String path) throws IOException {
+    private ResponseEntity<byte[]> instance(String instanceId, String path, String bridgeOrigin) throws IOException {
         if (path.startsWith("/__mmab/shim/")) {
             String name = path.substring("/__mmab/shim".length());
-            if (!name.endsWith(".mjs") || name.endsWith(".test.mjs")) {
+            if (!scriptName(name)) {
                 throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
             }
             return resolve(sdkRoot, name).map(this::read)
                     .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
         }
+        InstanceRuntime rt = instances.get(instanceId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
+        if (path.startsWith("/__mmab/app-shim/")) {
+            String name = path.substring("/__mmab/app-shim".length());
+            if (!scriptName(name) || name.indexOf('/', 1) >= 0 || rt.adapterRoot() == null) {
+                throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
+            }
+            return resolve(rt.adapterRoot().resolve("shim"), name).map(this::read)
+                    .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
+        }
         if (path.startsWith("/__mmab/")) {
             throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
         }
-        InstanceRuntime rt = instances.get(instanceId)
-                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
         if (rt.resourceRoot() == null) {
             throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
         }
@@ -95,19 +121,61 @@ public class ContentController {
             return read(file);
         }
         String original = Files.readString(file, StandardCharsets.UTF_8);
-        return html(injectShim(original));
+        AdapterDescriptor.Web web = rt.descriptor() == null ? null : rt.descriptor().web();
+        if (web == null) {
+            return html(injectShim(original));
+        }
+        return html(allowBridgeOrigin(injectScripts(original, web.inject()), bridgeOrigin));
+    }
+
+    /** 平台 / 适配器脚本：只提供 .js / .mjs，测试文件除外。 */
+    private static boolean scriptName(String name) {
+        return (name.endsWith(".mjs") || name.endsWith(".js")) && !name.endsWith(".test.mjs")
+                && !name.endsWith(".test.js");
     }
 
     /** 在第一个 {@code <head>} 之后插入 shim；没有 head 时放在最前。 */
     static String injectShim(String html) {
+        return insertAfterHead(html, SHIM_TAG);
+    }
+
+    /** M3：按 adapter.yaml {@code web.inject} 顺序插入经典脚本（同步执行，先于原版内联脚本与模块）。 */
+    static String injectScripts(String html, List<String> inject) {
+        StringBuilder tags = new StringBuilder();
+        for (String entry : inject) {
+            tags.append("<script src=\"").append(AdapterDescriptor.Web.url(entry)).append("\"></script>");
+        }
+        return insertAfterHead(html, tags.toString());
+    }
+
+    private static String insertAfterHead(String html, String tags) {
         int i = html.toLowerCase(Locale.ROOT).indexOf("<head");
         if (i >= 0) {
             int end = html.indexOf('>', i);
             if (end > 0) {
-                return html.substring(0, end + 1) + SHIM_TAG + html.substring(end + 1);
+                return html.substring(0, end + 1) + tags + html.substring(end + 1);
             }
         }
-        return SHIM_TAG + html;
+        return tags + html;
+    }
+
+    private static final java.util.regex.Pattern META_CSP = java.util.regex.Pattern.compile(
+            "(<meta\\s+http-equiv=\"Content-Security-Policy\"\\s+content=\"[^\"]*?connect-src)([^;\"]*)",
+            java.util.regex.Pattern.CASE_INSENSITIVE);
+
+    /**
+     * 原版页面自带 meta CSP 时，只在 connect-src 中追加本实例精确的 WS 来源（{@code wss://<host>:<port>}），
+     * 其余指令原样保留，不放宽 script-src 等（设计 §6.3）。没有 meta CSP 或没有 connect-src 时不改。
+     */
+    static String allowBridgeOrigin(String html, String bridgeOrigin) {
+        if (bridgeOrigin == null || !bridgeOrigin.matches("wss?://[A-Za-z0-9.\\[\\]:-]+")) {
+            return html;
+        }
+        java.util.regex.Matcher m = META_CSP.matcher(html);
+        if (!m.find() || m.group(2).contains(bridgeOrigin)) {
+            return html;
+        }
+        return html.substring(0, m.end(2)) + " " + bridgeOrigin + html.substring(m.end(2));
     }
 
     /** 根内安全解析；不存在、目录、越界、经符号链接逃逸都返回空。 */
@@ -179,6 +247,10 @@ public class ContentController {
         }
         if (n.endsWith(".woff2")) {
             return MediaType.valueOf("font/woff2");
+        }
+        String extra = EXTRA_TYPES.get(n.substring(n.lastIndexOf('.') + 1));
+        if (extra != null) {
+            return MediaType.valueOf(extra);
         }
         return MediaType.APPLICATION_OCTET_STREAM;
     }

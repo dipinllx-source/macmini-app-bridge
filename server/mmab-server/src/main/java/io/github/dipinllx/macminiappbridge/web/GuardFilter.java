@@ -17,6 +17,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.http.server.reactive.ServerHttpRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ServerWebExchange;
@@ -48,6 +49,9 @@ public class GuardFilter implements WebFilter {
     static final String BOOTSTRAP = "/__mmab/bridge/bootstrap";
     static final String WS = "/__mmab/bridge/ws";
     static final String SHIM_PREFIX = "/__mmab/shim/";
+    static final String APP_SHIM_PREFIX = "/__mmab/app-shim/";
+    /** M3：同步调用端点（启动引导 / sendSync 类），只接受 adapter.yaml 中声明 sync 的操作。 */
+    static final String SYNC_CALL = "/__mmab/bridge/call";
     static final String HEALTH = API_PREFIX + "health";
     static final String LOGIN = API_PREFIX + "auth/login";
 
@@ -81,7 +85,7 @@ public class GuardFilter implements WebFilter {
             return deny(exchange, MISDIRECTED, ErrorCode.NOT_FOUND);
         }
         int port = role.get().port();
-        if (!listeners.hostAllowed(req.getHeaders().getFirst(HttpHeaders.HOST), port)) {
+        if (!listeners.hostAllowed(req.getHeaders().getFirst(HttpHeaders.HOST), port, local.getAddress())) {
             return deny(exchange, MISDIRECTED, ErrorCode.HOST_REJECTED);
         }
         exchange.getAttributes().put(MmabAttributes.ROLE, role.get());
@@ -190,7 +194,7 @@ public class GuardFilter implements WebFilter {
         }
         boolean platformPath = path.startsWith("/__mmab/");
         if (platformPath && !path.equals(INSTANCE_LOGOUT) && !path.equals(BOOTSTRAP) && !path.equals(WS)
-                && !path.startsWith(SHIM_PREFIX)) {
+                && !path.equals(SYNC_CALL) && !path.startsWith(SHIM_PREFIX) && !path.startsWith(APP_SHIM_PREFIX)) {
             return deny(exchange, HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
         }
 
@@ -217,8 +221,26 @@ public class GuardFilter implements WebFilter {
             }
             return chain.filter(exchange);
         }
+        if (path.equals(SYNC_CALL)) {
+            out.set(HttpHeaders.CACHE_CONTROL, "no-store");
+            if (!HttpMethod.POST.equals(method)) {
+                return deny(exchange, HttpStatus.METHOD_NOT_ALLOWED, ErrorCode.METHOD_NOT_ALLOWED);
+            }
+            // 与 WS 升级同级：精确的本端口 Origin（null / 缺失拒绝），Fetch Metadata 只允许同源
+            if (!listeners.isOriginFor(origin, role.port())) {
+                return deny(exchange, HttpStatus.FORBIDDEN, ErrorCode.ORIGIN_REJECTED);
+            }
+            if (fetchSite != null && !"same-origin".equals(fetchSite)) {
+                return deny(exchange, HttpStatus.FORBIDDEN, ErrorCode.FETCH_SITE_REJECTED);
+            }
+            MediaType type = req.getHeaders().getContentType();
+            if (type == null || !MediaType.APPLICATION_JSON.isCompatibleWith(type)) {
+                return deny(exchange, HttpStatus.UNSUPPORTED_MEDIA_TYPE, ErrorCode.MALFORMED_FRAME);
+            }
+            return chain.filter(exchange);
+        }
         if (isUnsafe(method)) {
-            // M1：实例端口除 exchange / logout 外不接受写方法（原版资源代理只读）
+            // 实例端口除 exchange / logout / 同步调用外不接受写方法（原版资源代理只读）
             return deny(exchange, HttpStatus.METHOD_NOT_ALLOWED, ErrorCode.METHOD_NOT_ALLOWED);
         }
         if (path.equals(BOOTSTRAP)) {

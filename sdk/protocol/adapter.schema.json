@@ -205,7 +205,7 @@
     },
     "operations": {
       "type": "object",
-      "description": "Operation allowlist. Names must live in the adapter's namespace (appId without '-'); 'mmab.*' is reserved for the platform. Undeclared operations are rejected with UNKNOWN_OPERATION; operations whose capability is not SUPPORTED with CAPABILITY_DISABLED.",
+      "description": "Operation allowlist. Names must live in the adapter's namespace (appId without '-'); 'mmab.*' is reserved for the platform. Undeclared operations are rejected with UNKNOWN_OPERATION; operations whose capability is not enabled (see 'evidence') with CAPABILITY_DISABLED.",
       "propertyNames": {
         "pattern": "^[a-z][a-z0-9]*(\\.[a-z][a-zA-Z0-9-]*)+$",
         "maxLength": 64,
@@ -245,24 +245,155 @@
           "coalescible": {
             "type": "boolean",
             "description": "Events only: state notification that may be coalesced when the outbound queue is under pressure."
+          },
+          "sync": {
+            "type": "boolean",
+            "description": "Requests only (M3): may be called through the synchronous endpoint POST /__mmab/bridge/call (startup bootstrap, ipcRenderer.sendSync-style calls). Payloads must not carry MessagePorts."
           }
         },
-        "if": {
-          "properties": {
-            "coalescible": {
-              "const": true
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "coalescible": {
+                  "const": true
+                }
+              },
+              "required": [
+                "coalescible"
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "const": "event"
+                }
+              }
             }
           },
-          "required": [
-            "coalescible"
-          ]
-        },
-        "then": {
-          "properties": {
-            "kind": {
-              "const": "event"
+          {
+            "if": {
+              "properties": {
+                "sync": {
+                  "const": true
+                }
+              },
+              "required": [
+                "sync"
+              ]
+            },
+            "then": {
+              "properties": {
+                "kind": {
+                  "const": "request"
+                }
+              }
             }
           }
+        ]
+      }
+    },
+    "web": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "inject"
+      ],
+      "description": "M3: classic scripts injected right after the first <head> of the original index page, in order. platform:<name> -> /__mmab/shim/<name> (sdk/web), adapter:<name> -> /__mmab/app-shim/<name> (the package's shim/ directory), resource:/<path>.js -> a path inside the instance resource root. Without this block the M1 module shim is injected.",
+      "properties": {
+        "inject": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "pattern": "^((platform|adapter):[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.m?js|resource:(/[A-Za-z0-9_-][A-Za-z0-9._-]*)+\\.js)$"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "description": "M3 (ADR-0005): strongest evidence on the PLATFORM path per capability. When present, the gateway opens a SUPPORTED capability only with isolated-live/live evidence or an explicit operator verification grant (instance verify-capabilities). Absent = M1 semantics (SUPPORTED opens).",
+      "properties": {
+        "ui.render": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "ui.history": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "ui.compose": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "stream.push": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "file.upload": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "file.drop": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "clipboard.write": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "clipboard.read": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "media.voice": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "app.git": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "app.extension": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
         }
       }
     }

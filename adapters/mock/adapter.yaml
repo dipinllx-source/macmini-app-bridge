@@ -40,5 +40,12 @@ operations:
   mock.chunk: { capability: stream.push, kind: event }
   mock.tick: { capability: stream.push, kind: event, coalescible: true }
   mock.compose: { capability: ui.compose, kind: request }
+  # M3 平台通用件的离线测试：同步端点、MessagePort 中继、适配器要求关闭连接
+  mock.syncEcho: { capability: ui.render, kind: request, sync: true }
+  mock.openPort: { capability: ui.render, kind: request }
+  mock.adoptPort: { capability: ui.render, kind: request }
+  mock.forgePort: { capability: ui.render, kind: request }
+  mock.closeMe: { capability: ui.render, kind: request }
+  mock.stats: { capability: ui.render, kind: request }
 resources:
   source: adapter-bundled

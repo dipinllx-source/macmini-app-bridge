@@ -59,6 +59,13 @@ public class TransportRegistry {
         }
     }
 
+    /** 端口闲置回收（设计 §9.4：建议 5 分钟），由 MaintenanceSweeper 周期调用。 */
+    public void reapIdlePorts() {
+        for (BridgeConnection c : List.copyOf(byConnection.values())) {
+            c.reapIdlePorts();
+        }
+    }
+
     public int activeConnections() {
         return byConnection.size();
     }

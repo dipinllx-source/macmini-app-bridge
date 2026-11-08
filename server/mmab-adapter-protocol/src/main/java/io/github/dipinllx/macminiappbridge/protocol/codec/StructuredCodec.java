@@ -73,6 +73,35 @@ public final class StructuredCodec {
         decode(text);
     }
 
+    /**
+     * 校验并返回 payload 中出现的全部 MessagePort 引用 ID（按出现顺序，M3 端口中继用）。
+     * 同一 payload 内重复出现同一端口 ID 视为 {@link ErrorCode#PORT_STATE}（一个端口只能转移一次）。
+     */
+    public List<String> portIds(String text) {
+        List<String> ids = new ArrayList<>();
+        collectPorts(decode(text), ids);
+        if (ids.stream().distinct().count() != ids.size()) {
+            throw new ProtocolException(ErrorCode.PORT_STATE, "port transferred twice in one payload");
+        }
+        return ids;
+    }
+
+    private static void collectPorts(SvValue v, List<String> out) {
+        switch (v) {
+            case SvPort p -> out.add(p.id());
+            case SvArray a -> a.items().forEach(i -> collectPorts(i, out));
+            case SvObject o -> o.fields().values().forEach(i -> collectPorts(i, out));
+            case SvSet s -> s.items().forEach(i -> collectPorts(i, out));
+            case SvMap m -> m.entries().forEach(e -> {
+                collectPorts(e.key(), out);
+                collectPorts(e.value(), out);
+            });
+            default -> {
+                // 标量 / bytes / date / error 不含端口
+            }
+        }
+    }
+
     private SvValue fromNode(JsonNode n, int depth) {
         if (n.isNull()) {
             return new SvNull();

@@ -21,11 +21,13 @@ public class MaintenanceSweeper implements SmartLifecycle {
     private final LeaseManager leases;
     private final SessionService sessions;
     private final LaunchTicketService tickets;
+    private final io.github.dipinllx.macminiappbridge.proxy.TransportRegistry transports;
     private final long intervalMillis;
     private ScheduledExecutorService executor;
 
     public MaintenanceSweeper(LeaseManager leases, SessionService sessions, LaunchTicketService tickets,
-            MmabProperties properties) {
+            io.github.dipinllx.macminiappbridge.proxy.TransportRegistry transports, MmabProperties properties) {
+        this.transports = transports;
         this.leases = leases;
         this.sessions = sessions;
         this.tickets = tickets;
@@ -37,6 +39,7 @@ public class MaintenanceSweeper implements SmartLifecycle {
             leases.sweepExpired();
             sessions.sweep();
             tickets.sweep();
+            transports.reapIdlePorts();
         } catch (RuntimeException e) {
             log.warn("sweep failed: {}", e.getClass().getSimpleName());
         }

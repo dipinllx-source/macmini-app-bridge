@@ -1,6 +1,7 @@
 package io.github.dipinllx.macminiappbridge.web;
 
 import io.github.dipinllx.macminiappbridge.config.MmabProperties;
+import java.net.InetAddress;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -90,15 +91,36 @@ public class ListenerRegistry {
 
     /** Host 头必须精确等于 {@code <登记主机>:<该监听端口>}（防 DNS rebinding）。 */
     public boolean hostAllowed(String hostHeader, int port) {
-        if (hostHeader == null) {
+        return matchHost(hostHeader, port) != null;
+    }
+
+    /**
+     * 多地址绑定时更严格的 Host 校验（设计 §5.1）：除精确匹配登记主机 + 端口外，若该主机是 IP 字面量，
+     * 还必须恰为本连接到达的本地地址——从 127.0.0.1 进来的请求不能自称 LAN 地址，反之亦然。
+     */
+    public boolean hostAllowed(String hostHeader, int port, InetAddress localAddress) {
+        String h = matchHost(hostHeader, port);
+        if (h == null) {
             return false;
+        }
+        String literal = MmabProperties.literalOf(h);
+        if (literal == null) {
+            return true; // 主机名：只做精确匹配
+        }
+        return localAddress != null
+                && MmabProperties.normalizeLiteral(literal).equals(localAddress.getHostAddress().replaceFirst("%.*$", ""));
+    }
+
+    private String matchHost(String hostHeader, int port) {
+        if (hostHeader == null) {
+            return null;
         }
         for (String h : hosts) {
             if ((h + ":" + port).equalsIgnoreCase(hostHeader)) {
-                return true;
+                return h;
             }
         }
-        return false;
+        return null;
     }
 
     /** {@code origin} 是否恰为 {@code scheme://<登记主机>:<port>}。 */

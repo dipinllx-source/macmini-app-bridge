@@ -1,6 +1,20 @@
 package io.github.dipinllx.macminiappbridge.api;
 
 import io.github.dipinllx.macminiappbridge.audit.AuditLog;
+import io.github.dipinllx.macminiappbridge.config.MmabClock;
+import io.github.dipinllx.macminiappbridge.config.MmabProperties;
+import io.github.dipinllx.macminiappbridge.identity.Tokens;
+import io.github.dipinllx.macminiappbridge.instances.InstanceAccess;
+import io.github.dipinllx.macminiappbridge.instances.ProcessAdapterClient;
+import io.github.dipinllx.macminiappbridge.protocol.Envelope;
+import io.github.dipinllx.macminiappbridge.protocol.MessageKind;
+import io.github.dipinllx.macminiappbridge.protocol.ProtocolException;
+import io.github.dipinllx.macminiappbridge.protocol.StrictJson;
+import io.github.dipinllx.macminiappbridge.protocol.codec.StructuredCodec;
+import io.github.dipinllx.macminiappbridge.proxy.SyncCallRegistry;
+import org.springframework.core.io.buffer.DataBufferLimitException;
+import org.springframework.core.io.buffer.DataBufferUtils;
+import tools.jackson.databind.JsonNode;
 import io.github.dipinllx.macminiappbridge.identity.ConsoleSession;
 import io.github.dipinllx.macminiappbridge.identity.InstanceSession;
 import io.github.dipinllx.macminiappbridge.identity.LaunchTicketService;
@@ -46,9 +60,23 @@ public class InstancePortController {
     private final HandshakeWebSocketService webSocketService;
     private final AuditLog audit;
 
+    /** 同步调用的硬上限：阻塞浏览器主线程，不能用 30 秒的普通 deadline。 */
+    static final java.time.Duration SYNC_DEADLINE = java.time.Duration.ofSeconds(10);
+
+    private final InstanceAccess access;
+    private final SyncCallRegistry syncCalls;
+    private final MmabClock clock;
+    private final java.time.Duration requestDeadline;
+    private final StructuredCodec codec = new StructuredCodec();
+
     public InstancePortController(LaunchTicketService tickets, SessionService sessions, LeaseManager leases,
             InstanceRegistry instances, ListenerRegistry listeners, BridgeSocketHandler bridge,
-            HandshakeWebSocketService webSocketService, AuditLog audit) {
+            HandshakeWebSocketService webSocketService, AuditLog audit, InstanceAccess access,
+            SyncCallRegistry syncCalls, MmabClock clock, MmabProperties properties) {
+        this.access = access;
+        this.syncCalls = syncCalls;
+        this.clock = clock;
+        this.requestDeadline = properties.timeouts().requestDeadline();
         this.tickets = tickets;
         this.sessions = sessions;
         this.leases = leases;
@@ -128,9 +156,112 @@ public class InstancePortController {
         m.put("maxFrameBytes", AdapterProtocol.MAX_FRAME_BYTES);
         m.put("operations", d.operations().values().stream()
                 .filter(o -> o.kind() == AdapterDescriptor.OperationKind.REQUEST)
-                .filter(o -> d.state(o.capability()).enabledByDefault())
+                .filter(o -> d.enabled(o.capability()))
                 .map(AdapterDescriptor.OperationSpec::name).sorted().toList());
         return m;
+    }
+
+    /**
+     * M3 同步调用（设计 §10.3"sync bootstrap 等非 WS 数据面同样受策略约束"）：浏览器 shim 用同步 XHR 调用
+     * adapter.yaml 中声明 {@code sync: true} 的操作（启动引导快照、ipcRenderer.sendSync 类）。GuardFilter 已校验
+     * 会话 Cookie、精确 Origin、Fetch Metadata 与 Content-Type；这里再做网关闸门、codec 校验（不允许携带端口）、
+     * 租约 / generation 复核与 deadline。HTTP 200 + {@code {"payload"}} 或 {@code {"error"}}（与 WS RESPONSE 同形）。
+     */
+    @PostMapping("/__mmab/bridge/call")
+    public Mono<ResponseEntity<Map<String, Object>>> call(ServerWebExchange ex) {
+        InstanceSession s = Requests.instanceSession(ex);
+        return DataBufferUtils.join(ex.getRequest().getBody(), AdapterProtocol.MAX_FRAME_BYTES + 4096)
+                .map(buf -> {
+                    try {
+                        return buf.toString(java.nio.charset.StandardCharsets.UTF_8);
+                    } finally {
+                        DataBufferUtils.release(buf);
+                    }
+                })
+                .onErrorMap(DataBufferLimitException.class,
+                        e -> new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.QUEUE_LIMIT))
+                .defaultIfEmpty("")
+                .flatMap(body -> syncCall(s, body))
+                .map(r -> ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore()).body(r));
+    }
+
+    private Mono<Map<String, Object>> syncCall(InstanceSession s, String body) {
+        JsonNode frame;
+        try {
+            frame = StrictJson.WIRE.parse(body);
+        } catch (ProtocolException e) {
+            return Mono.just(error(ErrorCode.MALFORMED_FRAME));
+        }
+        if (!frame.isObject() || frame.size() != 2 || frame.get("op") == null || !frame.get("op").isString()
+                || frame.get("payload") == null || !frame.get("payload").isString()) {
+            return Mono.just(error(ErrorCode.MALFORMED_FRAME));
+        }
+        String op = frame.get("op").stringValue();
+        String payload = frame.get("payload").stringValue();
+        InstanceRuntime rt = instances.get(s.instanceId()).orElse(null);
+        if (rt == null || rt.descriptor() == null) {
+            return Mono.just(error(ErrorCode.ADAPTER_UNAVAILABLE));
+        }
+        AdapterDescriptor d = rt.descriptor();
+        Optional<ErrorCode> gate = d.gateSyncRequest(op);
+        if (gate.isPresent()) {
+            audit.record(s.id(), "bridge.sync", s.instanceId(), gate.get().name(), "gateway");
+            return Mono.just(error(gate.get()));
+        }
+        try {
+            if (!codec.portIds(payload).isEmpty()) {
+                return Mono.just(error(ErrorCode.CODEC_UNSUPPORTED)); // 同步调用没有连接，不能转移端口
+            }
+        } catch (ProtocolException e) {
+            return Mono.just(error(e.code()));
+        }
+        ErrorCode invalid = access.check(s);
+        if (invalid != null) {
+            return Mono.just(error(invalid));
+        }
+        ProcessAdapterClient client = rt.client();
+        if (client == null || !rt.ready()) {
+            return Mono.just(error(ErrorCode.ADAPTER_UNAVAILABLE));
+        }
+        String connectionId = SyncCallRegistry.PREFIX + Tokens.shortId("");
+        String correlationId = connectionId + "/1";
+        java.util.concurrent.CompletableFuture<Envelope> future =
+                syncCalls.register(s.instanceId(), connectionId, correlationId);
+        if (future == null) {
+            return Mono.just(error(ErrorCode.QUEUE_LIMIT));
+        }
+        java.time.Duration deadline = requestDeadline.compareTo(SYNC_DEADLINE) < 0 ? requestDeadline : SYNC_DEADLINE;
+        Envelope env = Envelope.builder()
+                .profileId(d.profileId())
+                .instanceId(s.instanceId())
+                .processGeneration(s.generation())
+                .connectionId(connectionId)
+                .leaseId(s.leaseId())
+                .fencingToken(s.fencingToken())
+                .sequence(1)
+                .correlationId(correlationId)
+                .messageKind(MessageKind.REQUEST)
+                .operation(op)
+                .deadline(clock.instant().plus(deadline))
+                .payload(payload)
+                .build();
+        return client.send(env)
+                .then(Mono.fromFuture(future))
+                .timeout(deadline)
+                .map(r -> r.error() != null ? error(r.error().code()) : Map.<String, Object>of("payload",
+                        r.payload()))
+                .onErrorResume(java.util.concurrent.TimeoutException.class, t -> {
+                    future.cancel(false);
+                    return Mono.just(error(ErrorCode.DEADLINE_EXCEEDED)); // 执行状态未知，迟到结果丢弃
+                })
+                .onErrorResume(ProtocolException.class, t -> {
+                    future.cancel(false);
+                    return Mono.just(error(t.code()));
+                });
+    }
+
+    private static Map<String, Object> error(ErrorCode code) {
+        return Map.of("error", Map.of("code", code.name(), "message", code.summary()));
     }
 
     @GetMapping("/__mmab/bridge/ws")

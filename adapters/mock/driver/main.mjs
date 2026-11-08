@@ -4,7 +4,7 @@
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { runAdapter } from '../../../sdk/driver-node/adapter-runtime.mjs';
-import { CodecError } from '../../../sdk/web/codec.mjs';
+import { CodecError, PortRef, decode, encode } from '../../../sdk/web/codec.mjs';
 
 export const ADAPTER_VERSION = '0.1.0';
 const MAX_BURST_COUNT = 256;
@@ -45,12 +45,77 @@ export const handlers = {
 
   /** Declared with capability ui.compose = DISABLED; the platform gateway must never let it through. */
   'mock.compose': () => 'compose reached the adapter',
+
+  // ---- M3 platform generics (offline tests) ----
+  /** Declared sync: callable through POST /__mmab/bridge/call. */
+  'mock.syncEcho': (value) => ({ sync: value }),
+
+  /** Opens a native-side port (id space "n") and returns it; data on it is echoed back (see ports below). */
+  'mock.openPort': (value, ctx) => ({ port: new PortRef(nextNativePort(ctx.connectionId)) }),
+
+  /** {port: PortRef("w...")}: the browser transferred a port; the adapter greets on it. */
+  'mock.adoptPort': async (value, ctx) => {
+    const id = value?.port instanceof PortRef ? value.port.id : null;
+    if (!id) throw new CodecError('MALFORMED_FRAME', 'mock.adoptPort expects {port}');
+    await ctx.api.portData(ctx.connectionId, id, encode({ hello: 'from adapter' }));
+    return true;
+  },
+
+  /** Returns a port reference in the BROWSER id space: the platform must refuse it (PORT_STATE). */
+  'mock.forgePort': () => ({ port: new PortRef('w999') }),
+
+  /** Asks the platform to close this browser connection. */
+  'mock.closeMe': (value, ctx) => {
+    setTimeout(() => ctx.api.closeConnection(ctx.connectionId, 'QUEUE_LIMIT'), 20);
+    return 'closing';
+  },
+
+  /** Diagnostics for tests: connections the platform reported closed, port frames seen. */
+  'mock.stats': () => ({ closed: [...stats.closed], portFrames: stats.portFrames, portCloses: stats.portCloses }),
 };
+
+const stats = { closed: [], portFrames: 0, portCloses: 0 };
+const nativeCounters = new Map();
+function nextNativePort(connectionId) {
+  const n = (nativeCounters.get(connectionId) ?? 0) + 1;
+  nativeCounters.set(connectionId, n);
+  return `n${n}`;
+}
+
+/** Port frames: echo data back on the same port; nested browser ports in the data get a greeting. */
+export const ports = {
+  async onData(connectionId, portId, payloadText, api) {
+    stats.portFrames++;
+    const value = decode(payloadText);
+    if (value && typeof value === 'object' && value.reply instanceof PortRef) {
+      await api.portData(connectionId, value.reply.id, encode({ nested: 'hello' }));
+      return;
+    }
+    if (value === 'close') {
+      await api.portClose(connectionId, portId);
+      return;
+    }
+    if (value && typeof value === 'object' && value.give === true) {
+      // native side transfers a NEW native port through an existing port (nested, depth + 1)
+      await api.portData(connectionId, portId, encode({ child: new PortRef(nextNativePort(connectionId)) }));
+      return;
+    }
+    await api.portData(connectionId, portId, encode({ echo: value }));
+  },
+  onClose() {
+    stats.portCloses++;
+  },
+};
+
+export function onConnectionClosed(connectionId) {
+  if (stats.closed.length < 64) stats.closed.push(connectionId);
+  nativeCounters.delete(connectionId);
+}
 
 const isMain = process.argv[1] !== undefined
   && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;
 if (isMain) {
-  runAdapter({ adapterVersion: ADAPTER_VERSION, handlers }).catch(() => {
+  runAdapter({ adapterVersion: ADAPTER_VERSION, handlers, ports, onConnectionClosed }).catch(() => {
     process.stderr.write('mock adapter failed to start\n');
     process.exit(1);
   });

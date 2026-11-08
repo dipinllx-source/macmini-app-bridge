@@ -17,17 +17,19 @@ public final class InstanceRuntime {
     private final MmabProperties.AdapterPackage adapterPackage;
     private final AdapterDescriptor descriptor;
     private final Path resourceRoot;
+    private final Path adapterRoot;
     private final AtomicLong generation = new AtomicLong(1);
     private volatile ProcessAdapterClient client;
     private volatile State state;
     private volatile ErrorCode blockedReason;
 
     InstanceRuntime(MmabProperties.Instance config, MmabProperties.AdapterPackage adapterPackage,
-            AdapterDescriptor descriptor, Path resourceRoot, State state, ErrorCode blockedReason) {
+            AdapterDescriptor descriptor, Path resourceRoot, Path adapterRoot, State state, ErrorCode blockedReason) {
         this.config = config;
         this.adapterPackage = adapterPackage;
         this.descriptor = descriptor;
         this.resourceRoot = resourceRoot;
+        this.adapterRoot = adapterRoot;
         this.state = state;
         this.blockedReason = blockedReason;
     }
@@ -52,6 +54,11 @@ public final class InstanceRuntime {
     /** 原版资源 / fixture 根目录；可能为 null。 */
     public Path resourceRoot() {
         return resourceRoot;
+    }
+
+    /** 适配器包目录（adapter.yaml 所在目录）；其 shim/ 子目录提供 {@code adapter:} 注入脚本。可能为 null。 */
+    public Path adapterRoot() {
+        return adapterRoot;
     }
 
     public long generation() {

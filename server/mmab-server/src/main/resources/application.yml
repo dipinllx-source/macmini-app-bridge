@@ -22,13 +22,20 @@ mmab:
     version: "@project.version@"
   # 仓库 / 安装根目录：adapters.*、web.* 中的相对路径以此为基准
   home: .
+  # 用户数据目录（M3）：运行时从本机 App 包提取的原版资源、适配器状态。不在仓库内、不进 Git。
+  # 留空 = ~/Library/Application Support/MacminiAppBridge；adapters[].resources 以 data: 开头时相对此目录。
+  data-dir:
   console:
     port: 8443
     # 默认只绑回环；正式版只绑精确 LAN IP 与 127.0.0.1，绝不绑 0.0.0.0（设计 §5.1）
     bind-address: 127.0.0.1
+    # M3：多个精确地址（IP 字面量，第一个为主地址），非空时优先于 bind-address。控制台与每个实例端口
+    # 都绑定列表里的每个地址，例如 [<LAN IP>, 127.0.0.1]。不允许 0.0.0.0 / :: / *。
+    bind-addresses: []
   web:
-    # Host / Origin 精确匹配用的主机；部署 LAN 访问时加上 LAN IP
-    public-hosts: [127.0.0.1]
+    # Host / Origin 精确匹配用的主机。留空 = 全部绑定地址（推荐）；显式填写时必须与绑定地址同步：
+    # 每个绑定地址都要列出，列出的 IP 字面量都必须是绑定地址（否则拒绝启动）。可另加主机名（将来的内网 DNS）。
+    public-hosts: []
     # Spring SSL bundle 名（spring.ssl.bundle.*）；为空时只允许回环明文 HTTP（开发 / 测试）
     tls-bundle:
     console-static-dir:

@@ -15,6 +15,7 @@ import io.github.dipinllx.macminiappbridge.protocol.MessageKind;
 import io.github.dipinllx.macminiappbridge.protocol.ProtocolException;
 import io.github.dipinllx.macminiappbridge.protocol.StrictJson;
 import io.github.dipinllx.macminiappbridge.protocol.codec.StructuredCodec;
+import io.github.dipinllx.macminiappbridge.protocol.ports.PortTable;
 import io.github.dipinllx.macminiappbridge.proxy.BoundedFrameQueue.Lane;
 import java.time.Duration;
 import java.time.Instant;
@@ -43,10 +44,16 @@ import tools.jackson.databind.node.ObjectNode;
  * ← {"kind":"RESPONSE","cid":"1","payload":"..."} | {"kind":"RESPONSE","cid":"1","error":{...}}
  * ← {"kind":"EVENT","op":"mock.tick","payload":"..."}
  * ← {"kind":"HEARTBEAT"} | {"kind":"ERROR","error":{...}}
+ * ↔ {"kind":"PORT_DATA","port":"w1","payload":"..."} | {"kind":"PORT_CLOSE","port":"w1"}   （M3 端口中继）
  * </pre>
  *
  * <p>浏览器不提供 instance / generation / lease / fence：这些由服务端按会话填入 envelope，
  * 浏览器无法伪造 fence。
+ *
+ * <p>M3 MessagePort 中继（设计 §9.4）：payload 中的 {@code {"$t":"port"}} 引用在本连接的 {@link PortTable} 中登记。
+ * 浏览器创建的端口 ID 必须以 {@code w} 开头、适配器创建的以 {@code n} 开头（任何一方都不能冒用对方的 ID 空间）；
+ * ID 在连接内不复用，关闭后的帧被拒，嵌套深度 / 端口数 / 闲置时间受预算约束，连接关闭时全部端口关闭，
+ * 并以 {@code CONTROL mmab.close} 通知适配器释放原生侧端口。
  */
 public final class BridgeConnection {
 
@@ -56,7 +63,10 @@ public final class BridgeConnection {
     public static final int CLOSE_OCCUPIED = 1013;
 
     private static final Pattern CID = Pattern.compile("^[A-Za-z0-9_-]{1,64}$");
-    private static final Set<String> FRAME_KEYS = Set.of("kind", "op", "cid", "payload");
+    private static final Set<String> FRAME_KEYS = Set.of("kind", "op", "cid", "payload", "port");
+    private static final Pattern PORT_ID = Pattern.compile("^[A-Za-z0-9_-]{1,64}$");
+    /** 平台控制操作：浏览器连接关闭（平台 → 适配器）/ 要求关闭某浏览器连接（适配器 → 平台）。 */
+    public static final String CLOSE_OPERATION = "mmab.close";
 
     private record Pending(String op, Instant deadline) {
     }
@@ -75,6 +85,7 @@ public final class BridgeConnection {
     private final Map<String, Pending> pending = new ConcurrentHashMap<>();
     private final AtomicLong sequence = new AtomicLong();
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final PortTable ports;
     private volatile ErrorCode closeReason;
 
     BridgeConnection(String connectionId, InstanceSession session, InstanceRuntime runtime, WebSocketSession ws,
@@ -89,6 +100,12 @@ public final class BridgeConnection {
         this.clock = clock;
         this.requestDeadline = requestDeadline;
         this.outbox = new SessionOutbox(BoundedFrameQueue.Budget.outbound(), this::onSlowConsumer);
+        this.ports = new PortTable(clock);
+    }
+
+    /** 本连接的端口表（只读诊断 / 测试）。 */
+    public PortTable ports() {
+        return ports;
     }
 
     public String connectionId() {
@@ -163,6 +180,8 @@ public final class BridgeConnection {
                 yield Mono.empty();
             }
             case "REQUEST" -> onRequest(frame);
+            case "PORT_DATA" -> onPortData(frame);
+            case "PORT_CLOSE" -> onPortClose(frame);
             default -> {
                 sendConnectionError(ErrorCode.MALFORMED_FRAME);
                 yield Mono.empty();
@@ -193,7 +212,7 @@ public final class BridgeConnection {
         }
         String payload = payloadNode.stringValue();
         try {
-            codec.validate(payload);
+            openPorts(codec.portIds(payload), WEB, null);
         } catch (ProtocolException e) {
             respondError(cid, e.code());
             return Mono.empty();
@@ -236,6 +255,166 @@ public final class BridgeConnection {
         });
     }
 
+    // ------------------------------------------------------------------ MessagePort relay (M3)
+
+    private static final char WEB = 'w';
+    private static final char NATIVE = 'n';
+
+    /** 登记 payload 里新出现的端口（全部校验通过才登记，避免半登记）。 */
+    private void openPorts(java.util.List<String> ids, char side, String parent) {
+        for (String id : ids) {
+            if (id.charAt(0) != side) {
+                throw new ProtocolException(ErrorCode.PORT_STATE, "port id outside the sender's id space");
+            }
+            if (ports.get(id) != null) {
+                throw new ProtocolException(ErrorCode.PORT_STATE, "port id already used");
+            }
+        }
+        for (String id : ids) {
+            ports.open(id, connectionId, parent);
+        }
+    }
+
+    private String portOf(JsonNode frame) {
+        JsonNode p = frame.get("port");
+        if (p == null || !p.isString() || !PORT_ID.matcher(p.stringValue()).matches()) {
+            throw new ProtocolException(ErrorCode.MALFORMED_FRAME, "port id");
+        }
+        return p.stringValue();
+    }
+
+    private Mono<Void> onPortData(JsonNode frame) {
+        String port;
+        String payload;
+        java.util.List<String> nested;
+        try {
+            port = portOf(frame);
+            JsonNode p = frame.get("payload");
+            if (p == null || !p.isString() || frame.get("op") != null || frame.get("cid") != null) {
+                throw new ProtocolException(ErrorCode.MALFORMED_FRAME, "port frame shape");
+            }
+            payload = p.stringValue();
+            PortTable.PortInfo info = ports.get(port);
+            if (info != null && info.state() == PortTable.State.CLOSED) {
+                return Mono.empty(); // 与关闭交错的迟到帧：丢弃（关闭已通知双方）
+            }
+            ports.data(port, connectionId);
+            nested = codec.portIds(payload);
+            openPorts(nested, WEB, port);
+        } catch (ProtocolException e) {
+            if (e.code() == ErrorCode.QUEUE_LIMIT) {
+                closePolicy(ErrorCode.QUEUE_LIMIT);
+            } else {
+                sendConnectionError(e.code());
+            }
+            return Mono.empty();
+        }
+        return forwardPort(MessageKind.PORT_DATA, port, payload);
+    }
+
+    private Mono<Void> onPortClose(JsonNode frame) {
+        String port;
+        try {
+            port = portOf(frame);
+            if (frame.get("payload") != null || frame.get("op") != null || frame.get("cid") != null) {
+                throw new ProtocolException(ErrorCode.MALFORMED_FRAME, "port frame shape");
+            }
+            if (!ports.close(port, connectionId)) {
+                return Mono.empty(); // 已关闭：幂等
+            }
+        } catch (ProtocolException e) {
+            sendConnectionError(e.code());
+            return Mono.empty();
+        }
+        return forwardPort(MessageKind.PORT_CLOSE, port, "");
+    }
+
+    private Mono<Void> forwardPort(MessageKind kind, String port, String payload) {
+        ProcessAdapterClient client = runtime.client();
+        if (client == null || !runtime.ready()) {
+            sendConnectionError(ErrorCode.ADAPTER_UNAVAILABLE);
+            return Mono.empty();
+        }
+        Envelope env = Envelope.builder()
+                .profileId(runtime.descriptor().profileId())
+                .instanceId(session.instanceId())
+                .processGeneration(session.generation())
+                .connectionId(connectionId)
+                .leaseId(session.leaseId())
+                .fencingToken(session.fencingToken())
+                .streamId(port)
+                .sequence(sequence.incrementAndGet())
+                .messageKind(kind)
+                .deadline(clock.instant().plus(requestDeadline))
+                .payload(payload)
+                .build();
+        return client.send(env).onErrorResume(ProtocolException.class, e -> {
+            if (e.code() == ErrorCode.QUEUE_LIMIT) {
+                closePolicy(ErrorCode.QUEUE_LIMIT);
+            } else {
+                sendConnectionError(e.code());
+            }
+            return Mono.empty();
+        });
+    }
+
+    /** 闲置回收（MaintenanceSweeper 调用）：超时端口两侧都收到 PORT_CLOSE。 */
+    void reapIdlePorts() {
+        if (closed.get()) {
+            return;
+        }
+        for (String id : ports.reapIdle()) {
+            ObjectNode f = StrictJson.WIRE.object();
+            f.put("kind", "PORT_CLOSE");
+            f.put("port", id);
+            outbox.offer(StrictJson.WIRE.write(f), Lane.CONTROL, null);
+            forwardPort(MessageKind.PORT_CLOSE, id, "").subscribe();
+        }
+    }
+
+    private void deliverPort(Envelope e) {
+        String port = e.streamId();
+        if (port == null || !PORT_ID.matcher(port).matches()) {
+            return;
+        }
+        PortTable.PortInfo info = ports.get(port);
+        if (info == null || info.state() != PortTable.State.OPEN) {
+            return; // 未知 / 已关闭端口：丢弃（不接到新端口上）
+        }
+        ObjectNode f = StrictJson.WIRE.object();
+        f.put("port", port);
+        if (e.messageKind() == MessageKind.PORT_CLOSE) {
+            ports.close(port, connectionId);
+            f.put("kind", "PORT_CLOSE");
+            outbox.offer(StrictJson.WIRE.write(f), Lane.CONTROL, null);
+            return;
+        }
+        try {
+            ports.data(port, connectionId);
+            openPorts(codec.portIds(e.payload()), NATIVE, port);
+        } catch (ProtocolException ex) {
+            audit.record(session.id(), "port.reject", instanceId(), ex.code().name(), "connection=" + connectionId);
+            if (ex.code() == ErrorCode.QUEUE_LIMIT) {
+                closePolicy(ErrorCode.QUEUE_LIMIT);
+            }
+            return;
+        }
+        f.put("kind", "PORT_DATA");
+        f.put("payload", e.payload());
+        outbox.offer(StrictJson.WIRE.write(f), Lane.DATA, null);
+    }
+
+    /** 适配器响应 / 事件里的端口引用（原生侧创建，必须是 n 空间）；不合规的帧整帧丢弃。 */
+    private boolean adoptNativePorts(String payload) {
+        try {
+            openPorts(codec.portIds(payload), NATIVE, null);
+            return true;
+        } catch (ProtocolException ex) {
+            audit.record(session.id(), "port.reject", instanceId(), ex.code().name(), "connection=" + connectionId);
+            return false;
+        }
+    }
+
     private void onDeadline(String cid) {
         if (pending.remove(cid) != null) {
             respondError(cid, ErrorCode.DEADLINE_EXCEEDED);
@@ -264,6 +443,8 @@ public final class BridgeConnection {
                 f.put("cid", cid);
                 if (e.error() != null) {
                     putError(f, e.error().code());
+                } else if (!adoptNativePorts(e.payload())) {
+                    putError(f, ErrorCode.PORT_STATE);
                 } else {
                     f.put("payload", e.payload());
                 }
@@ -274,14 +455,23 @@ public final class BridgeConnection {
                 if (!d.eventAllowed(e.operation())) {
                     return; // 未声明 / 能力未开启的推送不进浏览器
                 }
+                if (!adoptNativePorts(e.payload())) {
+                    return;
+                }
                 ObjectNode f = StrictJson.WIRE.object();
                 f.put("kind", "EVENT");
                 f.put("op", e.operation());
                 f.put("payload", e.payload());
                 outbox.offer(StrictJson.WIRE.write(f), Lane.DATA, d.coalescible(e.operation()) ? e.operation() : null);
             }
+            case PORT_DATA, PORT_CLOSE -> deliverPort(e);
+            case CONTROL -> {
+                if (CLOSE_OPERATION.equals(e.operation())) {
+                    closePolicy(e.error() != null && e.error().code() != null ? e.error().code() : ErrorCode.QUEUE_LIMIT);
+                }
+            }
             default -> {
-                // M1：端口类帧尚未接入浏览器中继
+                // HEARTBEAT / PORT_OPEN / PORT_TRANSFER / PORT_ERROR：浏览器中继不使用
             }
         }
     }
@@ -325,6 +515,7 @@ public final class BridgeConnection {
         }
         closeReason = reason;
         pending.clear();
+        releasePorts();
         audit.record(session.id(), "transport.close", instanceId(), reason == null ? "OK" : reason.name(),
                 "connection=" + connectionId);
         outbox.complete();
@@ -334,10 +525,36 @@ public final class BridgeConnection {
         }
     }
 
+    /** 关闭本连接全部端口，并通知适配器释放该连接的原生侧状态（端口、订阅）。 */
+    private void releasePorts() {
+        ports.closeAll();
+        ProcessAdapterClient client = runtime.client();
+        if (client == null || runtime.descriptor() == null) {
+            return;
+        }
+        try {
+            client.sendControl(Envelope.builder()
+                    .profileId(runtime.descriptor().profileId())
+                    .instanceId(session.instanceId())
+                    .processGeneration(session.generation())
+                    .connectionId(connectionId)
+                    .leaseId(session.leaseId())
+                    .fencingToken(session.fencingToken())
+                    .sequence(sequence.incrementAndGet())
+                    .messageKind(MessageKind.CONTROL)
+                    .operation(CLOSE_OPERATION)
+                    .deadline(clock.instant().plus(Duration.ofSeconds(30)))
+                    .build());
+        } catch (RuntimeException ignored) {
+            // 适配器已不在：其原生侧状态随进程消失
+        }
+    }
+
     /** 浏览器侧关闭 / 网络断开。 */
     void onTransportTerminated() {
         if (closed.compareAndSet(false, true)) {
             pending.clear();
+            releasePorts();
             outbox.complete();
             audit.record(session.id(), "transport.close", instanceId(), "OK", "connection=" + connectionId);
         }

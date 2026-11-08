@@ -19,7 +19,8 @@ public class WebConfig {
 
     /**
      * 控制台与实例监听共用 {@code mmab.web.tls-bundle}；未配置 TLS 时只允许回环地址（开发 / 测试），
-     * 否则拒绝启动（设计 §6.3：TLS 默认必需）。
+     * 否则拒绝启动（设计 §6.3：TLS 默认必需）。Spring 主服务器只绑主地址（列表第一个），
+     * 其余地址由 {@link InstanceListeners} 以同一端口补绑。
      */
     @Bean
     WebServerFactoryCustomizer<ConfigurableWebServerFactory> mmabConsoleServer(MmabProperties properties) {
@@ -31,7 +32,7 @@ public class WebConfig {
                 throw new IllegalStateException("mmab.console.bind-address is not resolvable", e);
             }
             String bundle = properties.web().tlsBundle();
-            if (bundle == null && !bind.isLoopbackAddress()) {
+            if (bundle == null && !properties.console().allLoopback()) {
                 throw new IllegalStateException("plain HTTP is only allowed on loopback; configure mmab.web.tls-bundle");
             }
             factory.setAddress(bind);

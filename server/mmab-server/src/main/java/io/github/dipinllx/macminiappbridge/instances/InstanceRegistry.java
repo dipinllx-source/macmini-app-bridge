@@ -9,7 +9,9 @@ import io.github.dipinllx.macminiappbridge.leases.LeaseManager;
 import io.github.dipinllx.macminiappbridge.protocol.Envelope;
 import io.github.dipinllx.macminiappbridge.protocol.ErrorCode;
 import io.github.dipinllx.macminiappbridge.protocol.MessageKind;
+import io.github.dipinllx.macminiappbridge.protocol.StandardCapability;
 import io.github.dipinllx.macminiappbridge.protocol.StrategyFamily;
+import io.github.dipinllx.macminiappbridge.proxy.SyncCallRegistry;
 import io.github.dipinllx.macminiappbridge.proxy.TransportRegistry;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -39,6 +41,7 @@ public class InstanceRegistry implements SmartLifecycle {
     private final MmabProperties properties;
     private final LeaseManager leases;
     private final TransportRegistry transports;
+    private final SyncCallRegistry syncCalls;
     private final ApplicationEventPublisher events;
     private final AuditLog audit;
     private final MmabClock clock;
@@ -48,10 +51,11 @@ public class InstanceRegistry implements SmartLifecycle {
     private volatile boolean running;
 
     public InstanceRegistry(MmabProperties properties, LeaseManager leases, TransportRegistry transports,
-            ApplicationEventPublisher events, AuditLog audit, MmabClock clock) {
+            SyncCallRegistry syncCalls, ApplicationEventPublisher events, AuditLog audit, MmabClock clock) {
         this.properties = properties;
         this.leases = leases;
         this.transports = transports;
+        this.syncCalls = syncCalls;
         this.events = events;
         this.audit = audit;
         this.clock = clock;
@@ -63,7 +67,7 @@ public class InstanceRegistry implements SmartLifecycle {
 
     private InstanceRuntime prepare(MmabProperties.Instance i) {
         if (!i.enabled()) {
-            return new InstanceRuntime(i, null, null, null, InstanceRuntime.State.DISABLED, null);
+            return new InstanceRuntime(i, null, null, null, null, InstanceRuntime.State.DISABLED, null);
         }
         MmabProperties.AdapterPackage pkg = properties.adapters().stream()
                 .filter(a -> a.appId().equals(i.appId())).findFirst().orElse(null);
@@ -85,20 +89,46 @@ public class InstanceRegistry implements SmartLifecycle {
         if (!d.supportsCurrentProtocol()) {
             return blocked(i, pkg, d, ErrorCode.PROTOCOL_VERSION_UNSUPPORTED, "protocol range");
         }
+        if (!i.verifyCapabilities().isEmpty()) {
+            try {
+                java.util.Set<StandardCapability> grants = java.util.EnumSet.noneOf(StandardCapability.class);
+                for (String id : i.verifyCapabilities()) {
+                    grants.add(StandardCapability.fromId(id)
+                            .orElseThrow(() -> new IllegalArgumentException("unknown capability")));
+                }
+                d = d.withGrants(grants);
+                audit.record(null, "capability.grant", i.id(), "OK", "capabilities=" + String.join(",",
+                        i.verifyCapabilities()));
+            } catch (IllegalArgumentException e) {
+                return blocked(i, pkg, d, ErrorCode.COMPATIBILITY_BLOCKED, "invalid verify-capabilities");
+            }
+        }
         Path resources = null;
         if (pkg.resources() != null) {
-            resources = home.resolve(pkg.resources()).normalize();
-            if (!resources.startsWith(home) || !Files.isDirectory(resources)) {
+            resources = resolveResources(pkg.resources());
+            if (resources == null || !Files.isDirectory(resources)) {
                 return blocked(i, pkg, d, ErrorCode.COMPATIBILITY_BLOCKED, "resources missing");
             }
         }
-        return new InstanceRuntime(i, pkg, d, resources, InstanceRuntime.State.STARTING, null);
+        Path adapterRoot = home.resolve(pkg.descriptor()).normalize().getParent();
+        return new InstanceRuntime(i, pkg, d, resources, adapterRoot, InstanceRuntime.State.STARTING, null);
+    }
+
+    /** {@code data:x/y} → mmab.data-dir 内；其余相对 home。越界返回 null。 */
+    private Path resolveResources(String spec) {
+        if (spec.startsWith("data:")) {
+            Path dataDir = Path.of(properties.dataDir()).toAbsolutePath().normalize();
+            Path p = dataDir.resolve(spec.substring("data:".length())).normalize();
+            return p.startsWith(dataDir) && !p.equals(dataDir) ? p : null;
+        }
+        Path p = home.resolve(spec).normalize();
+        return p.startsWith(home) ? p : null;
     }
 
     private InstanceRuntime blocked(MmabProperties.Instance i, MmabProperties.AdapterPackage pkg,
             AdapterDescriptor d, ErrorCode code, String detail) {
         log.warn("instance {} blocked: {} ({})", i.id(), code, detail);
-        return new InstanceRuntime(i, pkg, d, null, InstanceRuntime.State.BLOCKED, code);
+        return new InstanceRuntime(i, pkg, d, null, null, InstanceRuntime.State.BLOCKED, code);
     }
 
     // ------------------------------------------------------------------ lifecycle
@@ -258,6 +288,10 @@ public class InstanceRegistry implements SmartLifecycle {
             }
             if (!leases.isCurrent(rt.id(), e.leaseId(), e.fencingToken(), e.processGeneration())) {
                 return; // 租约已撤销 / 换代后的迟到帧
+            }
+            if (SyncCallRegistry.isSync(e.connectionId())) {
+                syncCalls.complete(rt.id(), e);
+                return;
             }
             transports.route(rt.id(), e);
         }
