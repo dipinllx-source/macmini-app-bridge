@@ -57,6 +57,12 @@ mmab:
       descriptor: adapters/mock/adapter.yaml
       command: [node, adapters/mock/driver/main.mjs]
       resources: adapters/mock/fixture
+    # 千问（S1）：资源由 adapters/qwenwork/tools/extract.mjs 从本机 App 包提取到 mmab.data-dir，绝不入库；
+    # 主进程桥由操作者显式运行 adapters/qwenwork/tools/inject.mjs 注入（见 adapters/qwenwork/README.md）。
+    - app-id: qwenwork
+      descriptor: adapters/qwenwork/adapter.yaml
+      command: [node, adapters/qwenwork/driver/main.mjs]
+      resources: data:qwenwork/2.0.0/renderer
   # enabled=false 表示仅登记、不开监听、不启动适配器。
   instances:
     - id: qwen-01

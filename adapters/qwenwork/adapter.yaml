@@ -1,36 +1,55 @@
-# MMAB adapter descriptor (draft) - 千问
-# 能力状态取自原型验收结论；平台实现尚未开始，所有能力在平台中实际均未启用。
+# MMAB adapter descriptor - 千问（qwenwork，策略族 S1：主进程注入）
+# 能力状态取自原型验收结论；evidence 是“经平台路径”的最强证据。当前只有离线证据，
+# 因此 SUPPORTED 的能力在平台上仍不开放，直到完成实机验收或操作者对实例显式授权（ADR-0005）。
 schemaVersion: 1
 appId: qwenwork
 displayName: 千问
+version: 0.3.0
 strategy: electron-main-inject
 protocol: { min: "1.0", max: "1.0" }
 app:
-  bundleId: TBD            # 在 M3 由 tools/probe 实测填写
-  executableAllowlist: [TBD]
+  bundleId: cn.qwenwork.desktop.mac
+  executableAllowlist: [/Applications/QwenWorkCN.app/Contents/MacOS/QwenWorkCN]
   versionSource: Info.plist
 permissions:
-  launchArguments: true      # 需以 inspect 参数启动
-  temporaryInspector: true   # 注入后立即关闭
+  launchArguments: true      # 需以 --inspect=127.0.0.1:9229 启动；适配器与注入工具都不会重启应用
+  temporaryInspector: true   # tools/inject.mjs 注入后立即关闭
   persistentCdp: false
-  fileUploadDir: true
+  fileUploadDir: false       # 附件尚未经平台实现
 risk:
   level: medium
   notes:
-    - 以真实主窗口身份调用 IPC，与本机窗口共享账号与状态
+    - 以真实主窗口身份调用 IPC，与本机窗口共享账号与状态；不是只读沙箱
     - 依赖应用私有 IPC 实现，升级后必须回归
-    - 普通方式启动的实例无法安全注入，需人工确认重启
+    - 普通方式启动的实例无法安全注入，需操作者确认后重启
 capabilities:
-  ui.render: SUPPORTED
-  ui.history: SUPPORTED
-  ui.compose: UNVERIFIED     # 旧版本已验收，当前版本未复验
+  ui.render: SUPPORTED       # 原型：1.3.2 / 2.0.0 原版界面已验收
+  ui.history: SUPPORTED      # 原型：2.0.0 历史会话已验收
+  ui.compose: UNVERIFIED     # 原型 1.3.2 已验收，2.0.0 未复验
   stream.push: UNVERIFIED
-  file.upload: UNVERIFIED
-  file.drop: UNVERIFIED
-  clipboard.write: UNVERIFIED
-  clipboard.read: UNSUPPORTED   # 非 HTTPS 时浏览器不允许；HTTPS 下待验证
-  media.voice: UNVERIFIED       # 需 HTTPS
+  file.upload: UNSUPPORTED   # 平台路径尚未实现
+  file.drop: UNSUPPORTED
+  clipboard.write: UNVERIFIED  # 浏览器本地写入，未在平台路径验证
+  clipboard.read: UNSUPPORTED
+  media.voice: UNVERIFIED
   app.git: UNSUPPORTED
   app.extension: UNVERIFIED
+# 全部 IPC 只能粗粒度归入 ui.render：tRPC 内的业务调用（含发消息）在 IPC 层无法逐项区分。
+operations:
+  qwenwork.bootstrap: { capability: ui.render, kind: request, sync: true }
+  qwenwork.invoke: { capability: ui.render, kind: request }
+  qwenwork.send: { capability: ui.render, kind: request }
+  qwenwork.sendSync: { capability: ui.render, kind: request, sync: true }
+  qwenwork.ipc: { capability: ui.render, kind: event }
+web:
+  inject:
+    - platform:codec.js
+    - platform:transport.js
+    - platform:electron-compat.js
+    - adapter:qwen-electron.js
+    - resource:/mmab-preload.js
+evidence:
+  ui.render: offline
+  ui.history: offline
 resources:
   source: extract-from-app-bundle
