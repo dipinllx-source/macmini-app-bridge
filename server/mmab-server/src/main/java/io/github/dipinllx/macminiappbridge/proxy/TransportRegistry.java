@@ -40,6 +40,13 @@ public class TransportRegistry {
         return c != null && c.suspended() ? java.util.Optional.of(c) : java.util.Optional.empty();
     }
 
+    /** 打开中的连接由平台续租约（不依赖后台标签页被限流的心跳）。 */
+    public void keepAlive() {
+        for (BridgeConnection c : List.copyOf(byConnection.values())) {
+            c.keepLeaseAlive();
+        }
+    }
+
     /** 宽限期已过的挂起连接：正式关闭并移除（MaintenanceSweeper 周期调用）。 */
     public int sweepSuspended() {
         int n = 0;

@@ -36,6 +36,7 @@ public class MaintenanceSweeper implements SmartLifecycle {
 
     public void sweepNow() {
         try {
+            transports.keepAlive(); // 先续期活动连接的租约，再清扫过期租约
             leases.sweepExpired();
             sessions.sweep();
             tickets.sweep();

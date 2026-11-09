@@ -314,14 +314,15 @@
     function scheduleReconnect() {
       if (closed) return;
       if (reconnectingSince === null) reconnectingSince = Date.now();
-      const delay = Math.min(15000, 1000 * 2 ** Math.min(attempt, 4));
+      const delay = Math.min(hidden() ? 30000 : 15000, 1000 * 2 ** Math.min(attempt, 5));
       attempt++;
       clearTimeout(retryTimer);
       retryTimer = setTimeout(() => {
         if (Date.now() - reconnectingSince > 2000) {
           banner('macmini App 引桥：连接中断，正在自动重新连接…', '__mmab_reconnect');
         }
-        if (hidden()) return; // resumed by visibilitychange
+        // keep trying while hidden too: background timers are throttled but still fire, and the server only keeps
+        // this page's state for a limited grace period (a visible tab retries at once via visibilitychange)
         probeThenConnect();
       }, delay);
     }

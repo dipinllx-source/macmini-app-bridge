@@ -13,6 +13,7 @@ import io.github.dipinllx.macminiappbridge.leases.LeaseManager;
 import io.github.dipinllx.macminiappbridge.protocol.ErrorCode;
 import io.github.dipinllx.macminiappbridge.protocol.codec.StructuredCodec;
 import io.github.dipinllx.macminiappbridge.protocol.codec.SvValue;
+import io.github.dipinllx.macminiappbridge.proxy.BridgeConnection;
 import io.github.dipinllx.macminiappbridge.proxy.TransportRegistry;
 import io.github.dipinllx.macminiappbridge.web.ListenerRegistry;
 import io.github.dipinllx.macminiappbridge.web.MaintenanceSweeper;
@@ -544,6 +545,35 @@ class OfflineEndToEndTest {
     }
 
     @Test
+    void throttledBackgroundTabKeepsItsConnection() throws Exception {
+        // 2026-11-10 实测根因：后台标签页心跳被限流到约每分钟一次，60 秒租约过期，连接被以 LEASE_REQUIRED 关闭。
+        // 现在打开中的连接由平台续租约，只要 5 分钟内收到过浏览器帧。
+        Console c = login();
+        String cookie = openSession(c, "mock-02");
+        Ws ws = ws("mock-02", cookie, origin("mock-02"), true);
+        ws.nextOfKind("HELLO");
+        for (int minute = 0; minute < 10; minute++) {
+            for (int s = 0; s < 6; s++) { // 60 s pass between two heartbeats
+                clock.advance(Duration.ofSeconds(10));
+                sweeper.sweepNow();
+            }
+            ws.send("{\"kind\":\"HEARTBEAT\"}");
+            ws.nextOfKind("HEARTBEAT");
+        }
+        assertThat(ws.closeCode).as("still open after 10 throttled minutes").isNotDone();
+        ws.request("mock.echo", "alive", "1");
+        assertThat(ws.response("alive").get("error")).isNull();
+
+        // a silent connection (no frame for 5 minutes: dead peer) does lose its lease
+        for (int s = 0; s < 36; s++) {
+            clock.advance(Duration.ofSeconds(10));
+            sweeper.sweepNow();
+        }
+        assertThat(ws.closeCode.get(5, TimeUnit.SECONDS)).isEqualTo(1008);
+        assertThat(ws.closeReason).isEqualTo("LEASE_REQUIRED");
+    }
+
+    @Test
     void droppedTransportResumesLosslesslyOnlyWithinTheGraceWindow() throws Exception {
         // reliable-personal-entry D2：网络中断（无关闭帧）后连接挂起；同一页面 40 秒内以 ?resume= 重连无损恢复
         Console c = login();
@@ -566,7 +596,7 @@ class OfflineEndToEndTest {
         // grace window over: the suspended connection is closed for good and cannot be resumed
         back.socket.abort();
         waitFor(() -> transports.suspended(id).isPresent());
-        clock.advance(Duration.ofSeconds(41));
+        clock.advance(BridgeConnection.RESUME_GRACE.plusSeconds(1));
         sweeper.sweepNow();
         assertThat(transports.suspended(id)).isEmpty();
         Ws late = ws("mock-02", cookie, origin("mock-02"), true, "?resume=" + id);
