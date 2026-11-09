@@ -63,6 +63,12 @@ mmab:
       descriptor: adapters/qwenwork/adapter.yaml
       command: [node, adapters/qwenwork/driver/main.mjs]
       resources: data:qwenwork/2.0.0/renderer
+    # Codex（S2）：资源由 adapters/codex/tools/extract.mjs 提取；专用实例由 adapters/codex/tools/launch.mjs 启动
+    # （独立 user-data-dir、调试端口只绑 127.0.0.1）。Codex 会自动升级：版本变化后需重新提取并更新下面两处版本号。
+    - app-id: codex
+      descriptor: adapters/codex/adapter.yaml
+      command: [node, adapters/codex/driver/main.mjs]
+      resources: data:codex/26.1103.41825/webview
   # enabled=false 表示仅登记、不开监听、不启动适配器。
   instances:
     - id: qwen-01

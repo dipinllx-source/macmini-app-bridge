@@ -1,27 +1,29 @@
-# MMAB adapter descriptor (draft) - Codex
-# 能力状态取自原型验收结论；平台实现尚未开始，所有能力在平台中实际均未启用。
+# MMAB adapter descriptor - Codex（codex，策略族 S2：页面进程调试接口 + MessagePort 中继）
+# 能力状态取自原型验收结论；evidence 是“经平台路径”的最强证据（ADR-0005）。
 schemaVersion: 1
 appId: codex
 displayName: Codex
+version: 0.1.0
 strategy: electron-renderer-cdp
 protocol: { min: "1.0", max: "1.0" }
 app:
-  bundleId: TBD            # 在 M3 由 tools/probe 实测填写
-  executableAllowlist: [TBD]
+  bundleId: com.openai.codex
+  executableAllowlist: [/Applications/ChatGPT.app/Contents/MacOS/ChatGPT]
   versionSource: Info.plist
 permissions:
-  launchArguments: true      # 独立 profile + 远程调试端口
+  launchArguments: true      # 专用实例：独立 --user-data-dir + --remote-debugging-port（只绑 127.0.0.1）
   temporaryInspector: false  # 应用禁止主进程调试
-  persistentCdp: true        # renderer CDP 必须常开，仅 127.0.0.1
+  persistentCdp: true        # 页面进程调试接口必须常开
   fileUploadDir: false
 risk:
   level: high
   notes:
-    - CDP 常开：本机其他进程理论上可控制该应用
+    - 调试接口常开：本机同一用户的其他进程可以操控该专用 Codex 窗口
     - app-host 通道具备原生账号写权限，不是只读沙箱
-    - 独立 user-data-dir 不保证账号隔离
+    - 独立 user-data-dir 不保证账号隔离（系统级凭据可能共享）
+    - 只附加到专用实例（精确可执行文件 + 精确 user-data-dir + 仅回环调试端口），从不附加操作者的正常 Codex
 capabilities:
-  ui.render: SUPPORTED       # 登录后原版界面与输入框可见
+  ui.render: SUPPORTED       # 原型：原版界面（登录后输入框可见）
   ui.history: UNVERIFIED
   ui.compose: UNVERIFIED
   stream.push: UNVERIFIED
@@ -30,7 +32,26 @@ capabilities:
   clipboard.write: UNVERIFIED
   clipboard.read: UNVERIFIED
   media.voice: UNVERIFIED
-  app.git: UNVERIFIED        # 仅端口握手已测
+  app.git: UNVERIFIED        # 原型只验证过端口握手
   app.extension: UNVERIFIED
+# app-host 的 MessagePort 承载原版全部业务 RPC，只能粗粒度归入 ui.render。
+operations:
+  codex.bootstrap: { capability: ui.render, kind: request, sync: true }
+  codex.read: { capability: ui.render, kind: request }
+  codex.viewReady: { capability: ui.render, kind: request }
+  codex.viewRead: { capability: ui.render, kind: request }
+  codex.connectAppHost: { capability: ui.render, kind: request }
+  codex.connectGit: { capability: app.git, kind: request }
+  codex.hostMessage: { capability: ui.render, kind: event }
+  codex.theme: { capability: ui.render, kind: event, coalescible: true }
+  codex.gitPort: { capability: app.git, kind: event }
+web:
+  inject:
+    - platform:codec.js
+    - platform:transport.js
+    - platform:ports.js
+    - adapter:codex-bridge.js
+evidence:
+  ui.render: offline
 resources:
   source: extract-from-app-bundle
