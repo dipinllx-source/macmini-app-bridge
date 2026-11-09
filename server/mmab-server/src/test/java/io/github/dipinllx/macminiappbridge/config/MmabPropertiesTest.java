@@ -68,6 +68,20 @@ class MmabPropertiesTest {
     }
 
     @Test
+    void transportDefaultsAndBinding() {
+        var t = new MmabProperties.Transport(0, 0);
+        assertThat(t.outboundMaxFrames()).isEqualTo(16384);
+        assertThat(t.outboundMaxBytes()).isEqualTo(32L * 1024 * 1024);
+        assertThat(t.resumeGrace()).isEqualTo(Duration.ofHours(12));
+        var bound = new org.springframework.boot.context.properties.bind.Binder(
+                new org.springframework.boot.context.properties.source.MapConfigurationPropertySource(java.util.Map.of(
+                        "mmab.transport.outbound-max-bytes", "4194304", "mmab.transport.resume-grace", "30m")))
+                .bind("mmab.transport", MmabProperties.Transport.class).get();
+        assertThat(bound.outboundMaxBytes()).as("bound through the canonical constructor").isEqualTo(4194304L);
+        assertThat(bound.resumeGrace()).isEqualTo(Duration.ofMinutes(30));
+    }
+
+    @Test
     void rejectsInvalidPublicHost() {
         assertThatThrownBy(() -> new MmabProperties.Web(List.of("evil.example:1"), null, null, null))
                 .isInstanceOf(IllegalArgumentException.class);

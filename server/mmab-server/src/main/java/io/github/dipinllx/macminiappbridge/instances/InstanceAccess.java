@@ -21,6 +21,13 @@ public class InstanceAccess {
     private final LeaseManager leases;
     private final InstanceRegistry instances;
 
+    private io.github.dipinllx.macminiappbridge.proxy.TransportRegistry transports;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setTransports(io.github.dipinllx.macminiappbridge.proxy.TransportRegistry transports) {
+        this.transports = transports;
+    }
+
     public InstanceAccess(SessionService sessions, LeaseManager leases, InstanceRegistry instances) {
         this.sessions = sessions;
         this.leases = leases;
@@ -56,6 +63,10 @@ public class InstanceAccess {
         }
         LeaseManager.AcquireResult r = leases.acquire(s.instanceId(), s.parentSessionId(),
                 instances.generation(s.instanceId()));
+        if (!r.ok() && r.rejection() == ErrorCode.LEASE_OCCUPIED && transports != null
+                && transports.yieldSuspended(s.instanceId(), leases)) {
+            r = leases.acquire(s.instanceId(), s.parentSessionId(), instances.generation(s.instanceId()));
+        }
         if (!r.ok()) {
             return r.rejection();
         }

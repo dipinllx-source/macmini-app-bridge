@@ -44,6 +44,23 @@ public class InstancesController {
     private final ListenerRegistry listeners;
     private final AuditLog audit;
 
+    private io.github.dipinllx.macminiappbridge.proxy.TransportRegistry transports;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setTransports(io.github.dipinllx.macminiappbridge.proxy.TransportRegistry transports) {
+        this.transports = transports;
+    }
+
+    /** 租约只被挂起中的连接（页面已断开）持有时，让位给新的打开请求（reliable-personal-entry）。 */
+    private LeaseManager.AcquireResult acquireOrTakeOver(String id, String sessionId, long generation) {
+        LeaseManager.AcquireResult r = leases.acquire(id, sessionId, generation);
+        if (!r.ok() && r.rejection() == ErrorCode.LEASE_OCCUPIED && transports != null
+                && transports.yieldSuspended(id, leases)) {
+            r = leases.acquire(id, sessionId, generation);
+        }
+        return r;
+    }
+
     public InstancesController(InstanceRegistry instances, LeaseManager leases, LaunchTicketService tickets,
             ListenerRegistry listeners, AuditLog audit) {
         this.instances = instances;
@@ -69,7 +86,7 @@ public class InstancesController {
     public ResponseEntity<Map<String, Object>> acquire(@PathVariable String id, ServerWebExchange ex) {
         ConsoleSession s = Requests.consoleSession(ex);
         InstanceRuntime rt = requireOpenable(id);
-        LeaseManager.AcquireResult r = leases.acquire(id, s.id(), rt.generation());
+        LeaseManager.AcquireResult r = acquireOrTakeOver(id, s.id(), rt.generation());
         audit.record(s.id(), "lease.acquire", id, r.ok() ? "OK" : r.rejection().name(), null);
         if (!r.ok()) {
             throw new ApiException(HttpStatus.CONFLICT, r.rejection());
@@ -114,7 +131,7 @@ public class InstancesController {
         String consoleOrigin = ex.getRequest().getHeaders().getOrigin();
         String host = listeners.originHost(consoleOrigin, listeners.consolePort())
                 .orElseThrow(() -> new ApiException(HttpStatus.FORBIDDEN, ErrorCode.ORIGIN_REJECTED));
-        LeaseManager.AcquireResult r = leases.acquire(id, s.id(), rt.generation());
+        LeaseManager.AcquireResult r = acquireOrTakeOver(id, s.id(), rt.generation());
         if (!r.ok()) {
             audit.record(s.id(), "ticket.issue", id, r.rejection().name(), null);
             throw new ApiException(HttpStatus.CONFLICT, r.rejection());

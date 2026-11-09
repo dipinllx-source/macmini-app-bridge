@@ -330,9 +330,18 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
      *
      * @param outboundMaxFrames 出站排队帧数上限（0 = 默认 16384）
      * @param outboundMaxBytes  出站排队字节上限（0 = 默认 32 MiB）
+     * @param resumeGrace       断开（无关闭帧）的连接保留多久等待同一页面恢复（默认 12 小时：覆盖远端电脑休眠一夜）；
+     *                          保留期间若有其他页面 / 设备打开该实例，保留中的连接让位
      */
-    public record Transport(int outboundMaxFrames, long outboundMaxBytes) {
+    public record Transport(int outboundMaxFrames, long outboundMaxBytes, java.time.Duration resumeGrace) {
+        public Transport(int outboundMaxFrames, long outboundMaxBytes) {
+            this(outboundMaxFrames, outboundMaxBytes, null);
+        }
+
+        @ConstructorBinding
         public Transport {
+            resumeGrace = resumeGrace == null || resumeGrace.isNegative() || resumeGrace.isZero()
+                    ? java.time.Duration.ofHours(12) : resumeGrace;
             outboundMaxFrames = outboundMaxFrames <= 0 ? 16384 : outboundMaxFrames;
             outboundMaxBytes = outboundMaxBytes <= 0 ? 32L * 1024 * 1024 : outboundMaxBytes;
             if (outboundMaxBytes > 512L * 1024 * 1024) {

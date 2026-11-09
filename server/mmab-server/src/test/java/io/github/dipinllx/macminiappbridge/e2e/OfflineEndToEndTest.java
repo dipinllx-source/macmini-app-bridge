@@ -545,6 +545,32 @@ class OfflineEndToEndTest {
     }
 
     @Test
+    void pageResumesLosslesslyAfterTheRemoteComputerSleptAndAnotherDeviceCanTakeOver() throws Exception {
+        // 远端电脑休眠：连接无关闭帧断开，数小时后醒来，同一页面带 resume id 重连 → 无损恢复
+        Console c = login();
+        String cookie = openSession(c, "mock-02");
+        Ws ws = ws("mock-02", cookie, origin("mock-02"), true);
+        String id = ws.nextOfKind("HELLO").get("connectionId").stringValue();
+        ws.socket.abort();
+        waitFor(() -> transports.suspended(id).isPresent());
+        for (int h = 0; h < 3 * 120; h++) { // 3 hours, sweeping every 30 s (production: every second)
+            clock.advance(Duration.ofSeconds(30));
+            sweeper.sweepNow();
+        }
+        Ws woke = ws("mock-02", cookie, origin("mock-02"), true, "?resume=" + id);
+        assertThat(woke.nextOfKind("HELLO").get("resumed").asBoolean()).as("lossless after 3 h of sleep").isTrue();
+        woke.request("mock.echo", "w", "1");
+        assertThat(woke.response("w").get("error")).isNull();
+
+        // the laptop sleeps again; meanwhile the operator opens the instance from another device (new console session)
+        woke.socket.abort();
+        waitFor(() -> transports.suspended(id).isPresent());
+        Console other = login();
+        assertThat(ticket(other, "mock-02").get("ticket").stringValue()).as("suspended page yields").isNotBlank();
+        assertThat(transports.suspended(id)).isEmpty();
+    }
+
+    @Test
     void throttledBackgroundTabKeepsItsConnection() throws Exception {
         // 2026-11-10 实测根因：后台标签页心跳被限流到约每分钟一次，60 秒租约过期，连接被以 LEASE_REQUIRED 关闭。
         // 现在打开中的连接由平台续租约，只要 5 分钟内收到过浏览器帧。

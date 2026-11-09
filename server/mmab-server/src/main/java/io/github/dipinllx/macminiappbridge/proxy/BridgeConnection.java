@@ -79,8 +79,9 @@ public final class BridgeConnection {
     private final InstanceRuntime runtime;
     private volatile WebSocketSession ws;
     /** reliable-personal-entry：传输断开后在宽限期内保留端口与缓冲，等待同一页面恢复。 */
-    // 2026-11-10 实测：浏览器后台标签页会限流定时器、甚至直接断开 WS（1006）；40 秒的宽限期不够页面在后台完成重连。
-    public static final Duration RESUME_GRACE = Duration.ofMinutes(10);
+    // 2026-11-10 实测：浏览器后台标签页会限流定时器、甚至直接断开 WS（1006）；远端电脑休眠时连接必然断开。
+    // 默认保留 12 小时（mmab.transport.resume-grace），醒来后同一页面无损恢复；其他页面 / 设备打开时保留中的连接让位。
+    public static final Duration RESUME_GRACE = Duration.ofHours(12);
     /**
      * 连接存活判定：最近一次收到浏览器帧在此时限内，平台就替它续租约（不依赖页面心跳准时）。
      * 后台标签页的心跳会被限流到约每分钟一次，曾导致 60 秒租约过期、连接被以 LEASE_REQUIRED 关闭。
@@ -632,9 +633,16 @@ public final class BridgeConnection {
      * 平台侧保活（MaintenanceSweeper 每次清扫调用）：连接打开且最近 {@link #LIVENESS} 内收到过浏览器帧时续租约。
      * 挂起中的连接在宽限期内同样续租约（见 {@link #expireIfSuspendedLongerThan}）。
      */
-    void keepLeaseAlive() {
+    void keepLeaseAlive(Duration grace) {
         java.time.Instant last = lastInbound;
-        if (closed.get() || suspendedAt != null) {
+        if (closed.get()) {
+            return;
+        }
+        java.time.Instant at = suspendedAt;
+        if (at != null) {
+            if (clock.instant().isBefore(at.plus(grace))) {
+                leases.touch(session.instanceId(), leaseId, fencingToken); // 挂起等待恢复期间保住租约
+            }
             return;
         }
         java.time.Instant now = clock.instant();

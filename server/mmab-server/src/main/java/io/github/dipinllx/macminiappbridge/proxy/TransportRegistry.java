@@ -43,15 +43,43 @@ public class TransportRegistry {
     /** 打开中的连接由平台续租约（不依赖后台标签页被限流的心跳）。 */
     public void keepAlive() {
         for (BridgeConnection c : List.copyOf(byConnection.values())) {
-            c.keepLeaseAlive();
+            c.keepLeaseAlive(resumeGrace);
         }
+    }
+
+    private volatile java.time.Duration resumeGrace = BridgeConnection.RESUME_GRACE;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void configure(io.github.dipinllx.macminiappbridge.config.MmabProperties properties) {
+        resumeGrace = properties.transport().resumeGrace();
+    }
+
+    /**
+     * 让位：实例的租约只被“挂起中”的连接持有（页面已断开、等待恢复）时，正式关闭它并释放租约，
+     * 让新的页面 / 设备可以打开该实例。
+     *
+     * @return 是否释放了租约
+     */
+    public synchronized boolean yieldSuspended(String instanceId, io.github.dipinllx.macminiappbridge.leases.LeaseManager leases) {
+        var current = leases.current(instanceId);
+        if (current.isEmpty()) {
+            return false;
+        }
+        BridgeConnection holder = byLease.get(current.get().leaseId());
+        if (holder == null || !holder.suspended()) {
+            return false;
+        }
+        holder.discardSuspended();
+        detach(holder);
+        leases.revokeInstance(instanceId, io.github.dipinllx.macminiappbridge.protocol.ErrorCode.LEASE_REQUIRED);
+        return true;
     }
 
     /** 宽限期已过的挂起连接：正式关闭并移除（MaintenanceSweeper 周期调用）。 */
     public int sweepSuspended() {
         int n = 0;
         for (BridgeConnection c : List.copyOf(byConnection.values())) {
-            if (c.expireIfSuspendedLongerThan(BridgeConnection.RESUME_GRACE) || (c.isClosed() && !c.suspended())) {
+            if (c.expireIfSuspendedLongerThan(resumeGrace) || (c.isClosed() && !c.suspended())) {
                 detach(c);
                 n++;
             }
@@ -86,6 +114,9 @@ public class TransportRegistry {
                     && (r.instanceSessionId() == null || r.instanceSessionId().equals(c.session().id()))
                     && (r.consoleSessionId() == null || r.consoleSessionId().equals(c.session().parentSessionId()))) {
                 c.closePolicy(r.reason());
+                if (c.isClosed()) {
+                    detach(c); // 挂起中的连接没有传输回调来移除自己
+                }
             }
         }
     }
