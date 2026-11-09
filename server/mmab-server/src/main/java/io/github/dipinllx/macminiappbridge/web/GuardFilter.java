@@ -58,6 +58,8 @@ public class GuardFilter implements WebFilter {
     static final String SYNC_CALL = "/__mmab/bridge/call";
     /** reliable-personal-entry D1：浏览器断线诊断（sendBeacon），只收白名单元数据。 */
     static final String DIAG = "/__mmab/bridge/diag";
+    /** reliable-personal-entry D2：重连前的状态探测（会话 / 租约 / 实例可用性），只读、同源。 */
+    static final String STATUS = "/__mmab/bridge/status";
     static final String HEALTH = API_PREFIX + "health";
     static final String LOGIN = API_PREFIX + "auth/login";
 
@@ -201,15 +203,22 @@ public class GuardFilter implements WebFilter {
         }
         boolean platformPath = path.startsWith("/__mmab/");
         if (platformPath && !path.equals(INSTANCE_LOGOUT) && !path.equals(BOOTSTRAP) && !path.equals(WS)
-                && !path.equals(SYNC_CALL) && !path.equals(DIAG) && !path.startsWith(SHIM_PREFIX)
+                && !path.equals(SYNC_CALL) && !path.equals(DIAG) && !path.equals(STATUS) && !path.startsWith(SHIM_PREFIX)
                 && !path.startsWith(APP_SHIM_PREFIX)) {
             return deny(exchange, HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
         }
 
-        Optional<InstanceSession> session = cookie(req, MmabAttributes.instanceCookie(role.instanceId()))
-                .flatMap(token -> access.resolve(token, role.instanceId(), role.port()));
+        InstanceAccess.Resolution resolution = cookie(req, MmabAttributes.instanceCookie(role.instanceId()))
+                .map(token -> access.resolveDetailed(token, role.instanceId(), role.port()))
+                .orElse(new InstanceAccess.Resolution(null, ErrorCode.UNAUTHENTICATED));
+        Optional<InstanceSession> session = Optional.ofNullable(resolution.session());
         if (session.isEmpty()) {
-            if (!platformPath && (HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method))) {
+            boolean page = !platformPath && (HttpMethod.GET.equals(method) || HttpMethod.HEAD.equals(method));
+            if (resolution.reason() == ErrorCode.LEASE_OCCUPIED) {
+                return page ? WebErrors.writeOccupiedHint(exchange)
+                        : deny(exchange, HttpStatus.CONFLICT, ErrorCode.LEASE_OCCUPIED);
+            }
+            if (page) {
                 return WebErrors.writeLoginHint(exchange);
             }
             return deny(exchange, HttpStatus.UNAUTHORIZED, ErrorCode.UNAUTHENTICATED);
@@ -268,6 +277,12 @@ public class GuardFilter implements WebFilter {
         if (isUnsafe(method)) {
             // 实例端口除 exchange / logout / 同步调用 / 诊断外不接受写方法（原版资源代理只读）
             return deny(exchange, HttpStatus.METHOD_NOT_ALLOWED, ErrorCode.METHOD_NOT_ALLOWED);
+        }
+        if (path.equals(STATUS)) {
+            out.set(HttpHeaders.CACHE_CONTROL, "no-store");
+            if (fetchSite != null && !"same-origin".equals(fetchSite)) {
+                return deny(exchange, HttpStatus.FORBIDDEN, ErrorCode.FETCH_SITE_REJECTED);
+            }
         }
         if (path.equals(BOOTSTRAP)) {
             out.set(HttpHeaders.CACHE_CONTROL, "no-store");

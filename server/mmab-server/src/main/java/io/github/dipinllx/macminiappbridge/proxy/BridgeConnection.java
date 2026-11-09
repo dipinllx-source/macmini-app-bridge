@@ -77,7 +77,10 @@ public final class BridgeConnection {
     private final long fencingToken;
     private final long generation;
     private final InstanceRuntime runtime;
-    private final WebSocketSession ws;
+    private volatile WebSocketSession ws;
+    /** reliable-personal-entry：传输断开后在宽限期内保留端口与缓冲，等待同一页面恢复。 */
+    public static final Duration RESUME_GRACE = Duration.ofSeconds(40);
+    private volatile java.time.Instant suspendedAt;
     private final SessionOutbox outbox;
     private final InstanceAccess access;
     private final LeaseManager leases;
@@ -533,6 +536,7 @@ public final class BridgeConnection {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
+        suspendedAt = null;
         closeReason = reason;
         pending.clear();
         releasePorts();
@@ -573,13 +577,98 @@ public final class BridgeConnection {
         }
     }
 
-    /** 浏览器侧关闭 / 网络断开。 */
+    /**
+     * 浏览器侧关闭 / 网络断开（reliable-personal-entry D2）：连接进入挂起，端口、原生侧状态与出站缓冲保留
+     * {@link #RESUME_GRACE}；同一页面在宽限期内以 {@code ?resume=<connectionId>} 重连即无损恢复。
+     * 超时由 {@link TransportRegistry#sweepSuspended()} 正式关闭。
+     *
+     * @param ended 终止的是哪个传输（防止旧传输的迟到回调挂起已恢复的连接）
+     */
+    synchronized void onTransportTerminated(WebSocketSession ended) {
+        onTransportTerminated(ended, 1006);
+    }
+
+    /**
+     * @param peerCode 对端关闭码：1000 / 1001（页面主动关闭 / 离开）直接正式关闭；其他（含无关闭帧的 1006）挂起
+     */
+    synchronized void onTransportTerminated(WebSocketSession ended, int peerCode) {
+        if (closed.get() || ended != ws) {
+            return;
+        }
+        if (peerCode == 1000 || peerCode == 1001) {
+            if (closed.compareAndSet(false, true)) {
+                suspendedAt = null;
+                pending.clear();
+                releasePorts();
+                outbox.complete();
+                audit.record(session.id(), "transport.close", instanceId(), "OK",
+                        "connection=" + connectionId + " peer=" + peerCode);
+            }
+            return;
+        }
+        if (suspendedAt != null) {
+            return;
+        }
+        suspendedAt = clock.instant();
+        pending.clear(); // 在途请求的结果对浏览器而言已不可知（不重放）
+        leases.touch(session.instanceId(), leaseId, fencingToken);
+        audit.record(session.id(), "transport.suspend", instanceId(), "OK", "connection=" + connectionId);
+    }
+
+    /** 兼容旧调用：以当前传输为准。 */
     void onTransportTerminated() {
+        onTransportTerminated(ws);
+    }
+
+    public boolean suspended() {
+        return suspendedAt != null && !closed.get();
+    }
+
+    /** 宽限期已过的挂起连接：正式关闭（释放端口、通知适配器）。 */
+    boolean expireIfSuspendedLongerThan(Duration grace) {
+        java.time.Instant at = suspendedAt;
+        if (at == null || closed.get() || clock.instant().isBefore(at.plus(grace))) {
+            if (at != null && !closed.get()) {
+                leases.touch(session.instanceId(), leaseId, fencingToken); // 宽限期内保住租约
+            }
+            return false;
+        }
         if (closed.compareAndSet(false, true)) {
-            pending.clear();
+            suspendedAt = null;
             releasePorts();
             outbox.complete();
-            audit.record(session.id(), "transport.close", instanceId(), "OK", "connection=" + connectionId);
+            audit.record(session.id(), "transport.close", instanceId(), "OK",
+                    "connection=" + connectionId + " cause=RESUME_EXPIRED");
         }
+        return true;
+    }
+
+    /** 新页面已建立连接：挂起中的旧连接立即正式关闭（不再可恢复）。 */
+    void discardSuspended() {
+        if (closed.compareAndSet(false, true)) {
+            suspendedAt = null;
+            releasePorts();
+            outbox.complete();
+            audit.record(session.id(), "transport.close", instanceId(), "OK",
+                    "connection=" + connectionId + " cause=SUPERSEDED");
+        }
+    }
+
+    /**
+     * 同一页面恢复：会话、租约绑定与 generation 仍有效时换上新的传输。
+     *
+     * @return 是否恢复成功
+     */
+    synchronized boolean resume(WebSocketSession next, InstanceSession who) {
+        if (closed.get() || suspendedAt == null || who != session
+                || access.check(session, leaseId, fencingToken, generation) != null) {
+            return false;
+        }
+        long gap = java.time.Duration.between(suspendedAt, clock.instant()).toMillis();
+        suspendedAt = null;
+        ws = next;
+        audit.record(session.id(), "transport.resume", instanceId(), "OK",
+                "connection=" + connectionId + " gapMs=" + gap);
+        return true;
     }
 }

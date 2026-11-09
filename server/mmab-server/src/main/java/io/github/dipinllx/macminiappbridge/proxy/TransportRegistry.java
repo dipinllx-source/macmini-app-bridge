@@ -20,12 +20,36 @@ public class TransportRegistry {
     private final Map<String, BridgeConnection> byLease = new ConcurrentHashMap<>();
     private final AtomicLong droppedFrames = new AtomicLong();
 
-    public boolean attach(BridgeConnection c) {
+    public synchronized boolean attach(BridgeConnection c) {
+        BridgeConnection existing = byLease.get(c.leaseId());
+        if (existing != null && (existing.suspended() || existing.isClosed())) {
+            // 页面重新加载 / 另一个页面接手：挂起中的旧连接不会再被恢复，立即正式关闭；已关闭的残留直接移除
+            existing.discardSuspended();
+            detach(existing);
+        }
         if (byLease.putIfAbsent(c.leaseId(), c) != null) {
             return false;
         }
         byConnection.put(c.connectionId(), c);
         return true;
+    }
+
+    /** 恢复：按连接 ID 找到挂起中的连接（由调用方校验会话与租约）。 */
+    public java.util.Optional<BridgeConnection> suspended(String connectionId) {
+        BridgeConnection c = connectionId == null ? null : byConnection.get(connectionId);
+        return c != null && c.suspended() ? java.util.Optional.of(c) : java.util.Optional.empty();
+    }
+
+    /** 宽限期已过的挂起连接：正式关闭并移除（MaintenanceSweeper 周期调用）。 */
+    public int sweepSuspended() {
+        int n = 0;
+        for (BridgeConnection c : List.copyOf(byConnection.values())) {
+            if (c.expireIfSuspendedLongerThan(BridgeConnection.RESUME_GRACE) || (c.isClosed() && !c.suspended())) {
+                detach(c);
+                n++;
+            }
+        }
+        return n;
     }
 
     public void detach(BridgeConnection c) {

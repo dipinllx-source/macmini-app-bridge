@@ -48,6 +48,18 @@ public class WebErrors {
         return response.writeWith(Mono.just(response.bufferFactory().wrap(html.getBytes(StandardCharsets.UTF_8))));
     }
 
+    /** 会话有效但实例已在别处打开（租约被占用）：提示而不是要求重新登录。 */
+    public static Mono<Void> writeOccupiedHint(ServerWebExchange exchange) {
+        ServerHttpResponse response = exchange.getResponse();
+        response.setStatusCode(HttpStatus.CONFLICT);
+        response.getHeaders().setContentType(new MediaType("text", "html", StandardCharsets.UTF_8));
+        response.getHeaders().set(HttpHeaders.CACHE_CONTROL, "no-store");
+        String html = "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><title>macmini App 引桥</title>"
+                + "</head><body><h1>该实例已在其他地方打开</h1><p>同一时间只允许一个页面使用该实例。"
+                + "请关闭另一个页面后刷新本页，或回到控制台重新打开。</p></body></html>";
+        return response.writeWith(Mono.just(response.bufferFactory().wrap(html.getBytes(StandardCharsets.UTF_8))));
+    }
+
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<Map<String, Object>> onApi(ApiException e) {
         return ResponseEntity.status(e.status()).header(HttpHeaders.CACHE_CONTROL, "no-store").body(body(e.code()));

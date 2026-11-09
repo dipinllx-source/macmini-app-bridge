@@ -18,6 +18,8 @@
   var t = T.create({
     // disconnect diagnostics remember recent host message types (never content)
     label: function (op, value) { return op === 'codex.hostMessage' && value && typeof value.type === 'string' ? 'host:' + value.type : op; },
+    // 连接未能无损恢复（超过宽限期 / 平台重启）：原版页面持有的订阅与端口已失效，受控地整页重新加载
+    onLost: function () { root.location.reload(); },
     onEvent: function (op, value, payloadText) {
       if (op === 'codex.hostMessage') {
         stats.hostMessages++;

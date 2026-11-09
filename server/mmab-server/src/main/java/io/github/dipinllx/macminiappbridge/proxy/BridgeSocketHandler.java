@@ -1,5 +1,6 @@
 package io.github.dipinllx.macminiappbridge.proxy;
 
+import java.util.Optional;
 import io.github.dipinllx.macminiappbridge.audit.AuditLog;
 import io.github.dipinllx.macminiappbridge.config.MmabClock;
 import io.github.dipinllx.macminiappbridge.config.MmabProperties;
@@ -55,26 +56,60 @@ public class BridgeSocketHandler {
         if (invalid != null) {
             return ws.close(new CloseStatus(BridgeConnection.CLOSE_POLICY, invalid.name()));
         }
-        BridgeConnection c = new BridgeConnection(Tokens.shortId("c-"), session, rt, ws, access, leases, audit, clock,
-                requestDeadline, outboundBudget);
-        if (!transports.attach(c)) {
-            audit.record(session.id(), "transport.open", session.instanceId(), ErrorCode.LEASE_OCCUPIED.name(), null);
-            return ws.close(new CloseStatus(BridgeConnection.CLOSE_OCCUPIED, ErrorCode.LEASE_OCCUPIED.name()));
+        // reliable-personal-entry D2：同一页面在宽限期内以 ?resume=<connectionId> 重连 → 换上新传输，端口与缓冲无损
+        String resumeId = resumeParam(ws);
+        Optional<BridgeConnection> resumable = transports.suspended(resumeId);
+        BridgeConnection c;
+        boolean resumed = false;
+        if (resumable.isPresent() && resumable.get().resume(ws, session)) {
+            c = resumable.get();
+            resumed = true;
+        } else {
+            c = new BridgeConnection(Tokens.shortId("c-"), session, rt, ws, access, leases, audit, clock,
+                    requestDeadline, outboundBudget);
+            if (!transports.attach(c)) {
+                audit.record(session.id(), "transport.open", session.instanceId(), ErrorCode.LEASE_OCCUPIED.name(), null);
+                return ws.close(new CloseStatus(BridgeConnection.CLOSE_OCCUPIED, ErrorCode.LEASE_OCCUPIED.name()));
+            }
+            audit.record(session.id(), "transport.open", session.instanceId(), "OK",
+                    "connection=" + c.connectionId() + (resumeId != null ? " resumeRefused=true" : ""));
         }
-        audit.record(session.id(), "transport.open", session.instanceId(), "OK", "connection=" + c.connectionId());
-        Mono<Void> out = c.outbox().flux()
+        // 第一帧告诉页面连接 ID 与是否无损恢复；未恢复时页面需要按应用自身方式重新初始化
+        c.outbox().offer("{\"kind\":\"HELLO\",\"connectionId\":\"" + c.connectionId() + "\",\"resumed\":" + resumed + "}",
+                BoundedFrameQueue.Lane.CONTROL, null);
+        final BridgeConnection conn = c;
+        Mono<Void> out = conn.outbox().flux()
                 .concatMap(text -> ws.send(Mono.just(ws.textMessage(text))), 1)
                 .then();
+        // 对端关闭码决定“正式关闭”还是“挂起等待恢复”；没有关闭帧（网络中断）按 1006 处理。
+        ws.closeStatus().map(CloseStatus::getCode).defaultIfEmpty(1006)
+                .subscribe(code -> conn.onTransportTerminated(ws, code), t -> conn.onTransportTerminated(ws, 1006));
         Mono<Void> in = ws.receive()
                 .map(BridgeConnection.Inbound::of)
-                .concatMap(c::onInbound, 1)
-                .then()
-                .doFinally(sig -> c.onTransportTerminated());
+                .concatMap(conn::onInbound, 1)
+                .then();
         return Mono.when(in, out)
                 .onErrorResume(t -> Mono.empty())
+                .then(Mono.delay(java.time.Duration.ofMillis(300)).then()) // 让关闭码先到
                 .doFinally(sig -> {
-                    c.onTransportTerminated();
-                    transports.detach(c);
+                    conn.onTransportTerminated(ws, 1006);
+                    if (!conn.suspended() && conn.isClosed()) {
+                        transports.detach(conn);
+                    }
                 });
+    }
+
+    private static String resumeParam(WebSocketSession ws) {
+        String q = ws.getHandshakeInfo().getUri().getRawQuery();
+        if (q == null) {
+            return null;
+        }
+        for (String part : q.split("&")) {
+            if (part.startsWith("resume=")) {
+                String v = part.substring("resume=".length());
+                return v.matches("c-[A-Za-z0-9_-]{4,40}") ? v : null;
+            }
+        }
+        return null;
     }
 }

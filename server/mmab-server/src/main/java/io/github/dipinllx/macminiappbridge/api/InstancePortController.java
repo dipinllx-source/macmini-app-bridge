@@ -168,6 +168,27 @@ public class InstancePortController {
      * 会话 Cookie、精确 Origin、Fetch Metadata 与 Content-Type；这里再做网关闸门、codec 校验（不允许携带端口）、
      * 租约 / generation 复核与 deadline。HTTP 200 + {@code {"payload"}} 或 {@code {"error"}}（与 WS RESPONSE 同形）。
      */
+    /**
+     * reliable-personal-entry D2：页面重连前的探测。到这里说明会话有效且租约已绑定（否则 GuardFilter 已返回
+     * 401 / 409）；再报告实例是否可接入（适配器就绪 / 升级受阻等）。不返回任何凭据或负载。
+     */
+    @GetMapping("/__mmab/bridge/status")
+    public ResponseEntity<Map<String, Object>> status(ServerWebExchange ex) {
+        InstanceSession s = Requests.instanceSession(ex);
+        InstanceRuntime rt = instances.get(s.instanceId()).orElse(null);
+        Map<String, Object> m = new LinkedHashMap<>();
+        boolean ready = rt != null && rt.ready() && rt.descriptor() != null;
+        m.put("ready", ready);
+        if (!ready) {
+            ErrorCode reason = rt == null ? ErrorCode.ADAPTER_UNAVAILABLE
+                    : rt.blockedReason() != null ? rt.blockedReason() : ErrorCode.ADAPTER_UNAVAILABLE;
+            m.put("reason", reason.name());
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .cacheControl(org.springframework.http.CacheControl.noStore()).body(m);
+        }
+        return ResponseEntity.ok().cacheControl(org.springframework.http.CacheControl.noStore()).body(m);
+    }
+
     /** reliable-personal-entry D1：浏览器断线诊断，只写审计（白名单元数据），204。 */
     @PostMapping("/__mmab/bridge/diag")
     public Mono<ResponseEntity<Void>> diag(ServerWebExchange ex) {

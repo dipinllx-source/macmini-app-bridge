@@ -40,6 +40,7 @@ public class MaintenanceSweeper implements SmartLifecycle {
             sessions.sweep();
             tickets.sweep();
             transports.reapIdlePorts();
+            transports.sweepSuspended();
         } catch (RuntimeException e) {
             log.warn("sweep failed: {}", e.getClass().getSimpleName());
         }

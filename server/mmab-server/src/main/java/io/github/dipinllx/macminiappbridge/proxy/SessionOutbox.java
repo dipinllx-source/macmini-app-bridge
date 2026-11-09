@@ -63,7 +63,16 @@ public final class SessionOutbox {
                 }
                 drain();
             });
-            s.onDispose(queue::close);
+            // reliable-personal-entry：传输断开（挂起）时只解除下游，缓冲保留，恢复后由新的订阅继续发送；
+            // 只有 complete()（连接真正关闭）才关闭缓冲。
+            s.onDispose(() -> {
+                synchronized (this) {
+                    if (sink == s) {
+                        sink = null;
+                        requested = 0;
+                    }
+                }
+            });
         });
     }
 

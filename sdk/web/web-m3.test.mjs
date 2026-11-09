@@ -160,7 +160,8 @@ function transportSandbox({ xhrResponse = { status: 200, body: '{"payload":"1"}'
   };
   const ctx = vm.createContext({
     WebSocket: FakeWS, XMLHttpRequest: FakeXHR, document, location: { protocol: 'https:', host: '10.0.0.5:8445' },
-    setInterval: () => 1, clearInterval() {}, console, Event, EventTarget, TextEncoder, TextDecoder, btoa, atob,
+    setInterval: () => 1, clearInterval() {}, setTimeout: () => 0, clearTimeout() {},
+    console, Event, EventTarget, TextEncoder, TextDecoder, btoa, atob,
     ...extra,
   });
   ctx.globalThis = ctx;
@@ -197,22 +198,93 @@ test('transport queues until open, matches responses, routes events / port frame
   await assert.rejects(failing, (e) => e.code === 'CAPABILITY_DISABLED');
   const dangling = t.request('qwenwork.invoke', inCtx('{}'));
   ws.shut(1013, 'LEASE_OCCUPIED');
-  await assert.rejects(dangling, (e) => e.code === 'LEASE_OCCUPIED');
-  assert.match(nodes.get('__mmab_banner').textContent, /另一个标签页/);
+  await assert.rejects(dangling, (e) => e.code === 'DEADLINE_EXCEEDED', 'in-flight outcome is unknown, never replayed');
+  assert.match(nodes.get('__mmab_banner').textContent, /其他标签页或设备/);
   assert.throws(() => t.sendPortData('n1', '1'), (e) => e.code === 'LEASE_OCCUPIED');
-  assert.equal(nodes.get('__mmab_banner').children.length, 0, 'occupied: no reload button');
+  assert.equal(nodes.get('__mmab_banner').children.length, 1, 'occupied: reload once the other page is closed');
 });
 
-test('abnormal close (1006) tells the user a reload reconnects and offers a button', () => {
-  const { ctx, sockets, nodes } = transportSandbox();
-  ctx.MmabTransport.create();
+/** Reconnect harness: manual timers and a scripted /__mmab/bridge/status probe. */
+function reconnectSandbox(statuses) {
+  const timers = [];
+  const probes = [];
+  const extra = {
+    setTimeout: (fn) => { timers.push(fn); return timers.length; },
+    clearTimeout() {},
+    fetch: (url) => {
+      probes.push(url);
+      const [status, body] = statuses.shift() ?? [200, { ready: true }];
+      return Promise.resolve({ status, json: () => Promise.resolve(body) });
+    },
+  };
+  const sb = transportSandbox({ extra });
+  const tick = async () => { const fn = timers.shift(); fn(); await new Promise((r) => setImmediate(r)); };
+  return { ...sb, timers, probes, tick };
+}
+
+test('network drop: in-flight requests fail as unknown, the page reconnects with its resume id, nothing is replayed', async () => {
+  const { ctx, sockets, nodes, timers, probes, tick } = reconnectSandbox([[200, { ready: true }]]);
+  let lost = 0;
+  const t = ctx.MmabTransport.create({ onLost: () => { lost++; } });
   sockets[0].open();
+  sockets[0].message({ kind: 'HELLO', connectionId: 'c-abcd1234', resumed: false });
+  const inFlight = t.request('qwenwork.invoke', 1);
   sockets[0].shut(1006, '');
-  const b = nodes.get('__mmab_banner');
-  assert.match(b.textContent, /1006/);
-  assert.match(b.textContent, /刷新本页即可重新连接/);
-  assert.equal(b.children.length, 1);
-  assert.equal(b.children[0].textContent, '刷新重连');
+  await assert.rejects(inFlight, (e) => e.code === 'DEADLINE_EXCEEDED');
+  assert.equal(nodes.get('__mmab_banner'), undefined, 'no error banner for a recoverable drop');
+  const queued = t.request('qwenwork.invoke', 2); // issued while reconnecting: sent once, after reopening
+  assert.equal(timers.length, 1);
+  await tick();
+  assert.deepEqual(probes, ['/__mmab/bridge/status']);
+  assert.equal(sockets.length, 2);
+  assert.match(sockets[1].url, /\/__mmab\/bridge\/ws\?resume=c-abcd1234$/);
+  sockets[1].open();
+  assert.equal(sockets[1].sent.length, 1, 'only the request issued after the drop, no replay');
+  assert.equal(sockets[1].sent[0].payload, encode(2));
+  sockets[1].message({ kind: 'HELLO', connectionId: 'c-abcd1234', resumed: true });
+  assert.equal(lost, 0, 'lossless resume: the app keeps its state');
+  sockets[1].message({ kind: 'RESPONSE', cid: sockets[1].sent[0].cid, payload: encode('ok') });
+  assert.equal(await queued, 'ok');
+
+  // later the server could not resume (grace over / platform restart): the app is told to start over
+  sockets[1].shut(1006, '');
+  await tick();
+  sockets[2].open();
+  sockets[2].message({ kind: 'HELLO', connectionId: 'c-new99999', resumed: false });
+  assert.equal(lost, 1);
+});
+
+test('reconnect stops with a clear notice when the session is gone or the instance is taken', async () => {
+  const gone = reconnectSandbox([[401, { error: { code: 'UNAUTHENTICATED' } }]]);
+  gone.ctx.MmabTransport.create();
+  gone.sockets[0].open();
+  gone.sockets[0].shut(1006, '');
+  await gone.tick();
+  assert.equal(gone.sockets.length, 1, 'no new socket');
+  assert.match(gone.nodes.get('__mmab_banner').textContent, /重新登录/);
+
+  const taken = reconnectSandbox([[409, { error: { code: 'LEASE_OCCUPIED' } }]]);
+  taken.ctx.MmabTransport.create();
+  taken.sockets[0].open();
+  taken.sockets[0].shut(1006, '');
+  await taken.tick();
+  assert.match(taken.nodes.get('__mmab_banner').textContent, /其他标签页或设备/);
+
+  const occupied = reconnectSandbox([]);
+  occupied.ctx.MmabTransport.create();
+  occupied.sockets[0].open();
+  occupied.sockets[0].shut(1013, 'LEASE_OCCUPIED');
+  assert.equal(occupied.timers.length, 0, '1013 is final');
+  assert.match(occupied.nodes.get('__mmab_banner').textContent, /其他标签页或设备/);
+
+  const restarting = reconnectSandbox([[503, { ready: false, reason: 'ADAPTER_UNAVAILABLE' }], [200, { ready: true }]]);
+  restarting.ctx.MmabTransport.create();
+  restarting.sockets[0].open();
+  restarting.sockets[0].shut(1006, '');
+  await restarting.tick(); // probe: 503 -> keep trying
+  assert.equal(restarting.sockets.length, 1);
+  await restarting.tick(); // probe: 200 -> reconnect
+  assert.equal(restarting.sockets.length, 2);
 });
 
 test('transport sync call uses the sync endpoint and surfaces gateway errors', () => {

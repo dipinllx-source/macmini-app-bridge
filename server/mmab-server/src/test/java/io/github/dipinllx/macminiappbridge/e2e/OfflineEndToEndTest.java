@@ -219,7 +219,8 @@ class OfflineEndToEndTest {
         HttpResponse<String> late = exchange("mock-01", t, consoleOrigin());
         assertThat(late.statusCode()).isEqualTo(403);
         assertThat(late.headers().allValues("set-cookie")).isEmpty();
-        assertThat(lastAudit("ticket.exchange").detail()).isEqualTo("EXPIRED");
+        // 过期票据可能已被每秒一次的清扫移除：两种拒绝原因都表示“过期不可用”
+        assertThat(lastAudit("ticket.exchange").detail()).isIn("EXPIRED", "UNKNOWN_OR_REPLAYED");
     }
 
     @Test
@@ -543,6 +544,63 @@ class OfflineEndToEndTest {
     }
 
     @Test
+    void droppedTransportResumesLosslesslyOnlyWithinTheGraceWindow() throws Exception {
+        // reliable-personal-entry D2：网络中断（无关闭帧）后连接挂起；同一页面 40 秒内以 ?resume= 重连无损恢复
+        Console c = login();
+        String cookie = openSession(c, "mock-02");
+        Ws ws = ws("mock-02", cookie, origin("mock-02"), true);
+        JsonNode hello = ws.nextOfKind("HELLO");
+        assertThat(hello.get("resumed").asBoolean()).isFalse();
+        String id = hello.get("connectionId").stringValue();
+        ws.socket.abort();
+        waitFor(() -> transports.suspended(id).isPresent());
+
+        Ws back = ws("mock-02", cookie, origin("mock-02"), true, "?resume=" + id);
+        JsonNode h2 = back.nextOfKind("HELLO");
+        assertThat(h2.get("resumed").asBoolean()).isTrue();
+        assertThat(h2.get("connectionId").stringValue()).isEqualTo(id);
+        back.request("mock.echo", "r1", "\"after resume\"");
+        assertThat(back.response("r1").get("error")).isNull();
+        assertThat(audit.recent(50)).anySatisfy(e -> assertThat(e.action()).isEqualTo("transport.resume"));
+
+        // grace window over: the suspended connection is closed for good and cannot be resumed
+        back.socket.abort();
+        waitFor(() -> transports.suspended(id).isPresent());
+        clock.advance(Duration.ofSeconds(41));
+        sweeper.sweepNow();
+        assertThat(transports.suspended(id)).isEmpty();
+        Ws late = ws("mock-02", cookie, origin("mock-02"), true, "?resume=" + id);
+        JsonNode h3 = late.nextOfKind("HELLO");
+        assertThat(h3.get("resumed").asBoolean()).as("too late: fresh connection, page must re-initialise").isFalse();
+        assertThat(h3.get("connectionId").stringValue()).isNotEqualTo(id);
+
+        // a new page (no resume id) supersedes a suspended connection instead of being told "occupied"
+        late.socket.abort();
+        String lateId = h3.get("connectionId").stringValue();
+        waitFor(() -> transports.suspended(lateId).isPresent());
+        Ws fresh = ws("mock-02", cookie, origin("mock-02"), true);
+        assertThat(fresh.nextOfKind("HELLO").get("resumed").asBoolean()).isFalse();
+        assertThat(transports.suspended(lateId)).isEmpty();
+
+        // a clean close (page closed) ends the connection at once
+        String freshId = transports.connections().stream().filter(x -> x.instanceId().equals("mock-02"))
+                .findFirst().orElseThrow().connectionId();
+        fresh.socket.sendClose(1000, "client").join();
+        waitFor(() -> !transports.isOpen(freshId));
+        assertThat(transports.suspended(freshId)).isEmpty();
+    }
+
+    static void waitFor(java.util.function.BooleanSupplier ok) throws InterruptedException {
+        long end = System.currentTimeMillis() + 5000;
+        while (!ok.getAsBoolean()) {
+            if (System.currentTimeMillis() > end) {
+                throw new AssertionError("condition not reached within 5 s");
+            }
+            Thread.sleep(25);
+        }
+    }
+
+    @Test
     void anotherConsoleHoldingTheLeaseBlocksRebinding() throws Exception {
         Console c = login();
         String cookie = openSession(c, "mock-02");
@@ -550,7 +608,9 @@ class OfflineEndToEndTest {
         sweeper.sweepNow();
         Console other = login();
         assertThat(consolePost(other, "/__mmab/api/v1/instances/mock-02/leases", "").statusCode()).isEqualTo(201);
-        assertThat(instanceGet("mock-02", "/", cookie, null).statusCode()).as("occupied: no rebinding").isEqualTo(401);
+        assertThat(instanceGet("mock-02", "/", cookie, null).statusCode()).as("occupied: no rebinding, told why")
+                .isEqualTo(409);
+        assertThat(instanceGet("mock-02", "/__mmab/bridge/status", cookie, "same-origin").body()).contains("LEASE_OCCUPIED");
     }
 
     // =================================================================== 6. backpressure / slow client
@@ -685,12 +745,16 @@ class OfflineEndToEndTest {
     }
 
     Ws ws(String id, String cookie, String origin, boolean reading) {
+        return ws(id, cookie, origin, reading, "");
+    }
+
+    Ws ws(String id, String cookie, String origin, boolean reading, String query) {
         Ws listener = new Ws(reading);
         WebSocket.Builder b = http.newWebSocketBuilder().header("Cookie", "__Host-mmab-i-" + id + "=" + cookie);
         if (origin != null) {
             b.header("Origin", origin);
         }
-        String uri = origin(id).replace("https://", "wss://") + "/__mmab/bridge/ws";
+        String uri = origin(id).replace("https://", "wss://") + "/__mmab/bridge/ws" + query;
         listener.socket = b.buildAsync(URI.create(uri), listener).join();
         sockets.add(listener);
         return listener;

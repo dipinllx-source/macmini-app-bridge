@@ -35,6 +35,8 @@
   var t = transport.create({
     // disconnect diagnostics remember recent IPC channel names (never arguments)
     label: function (op, value) { return value && typeof value.channel === 'string' ? value.channel : op; },
+    // 连接未能无损恢复（超过宽限期 / 平台重启）：原版页面持有的订阅与端口已失效，受控地整页重新加载
+    onLost: function () { root.location.reload(); },
     onEvent: function (op, value) {
       if (op !== 'qwenwork.ipc' || !value || typeof value.channel !== 'string' || !Array.isArray(value.args)) return;
       dispatch(value.channel, value.args);

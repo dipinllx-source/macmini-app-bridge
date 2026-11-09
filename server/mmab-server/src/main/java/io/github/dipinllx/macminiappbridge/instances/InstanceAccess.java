@@ -31,6 +31,19 @@ public class InstanceAccess {
         return sessions.resolveInstance(token, instanceId, port).filter(s -> ensureBound(s) == null);
     }
 
+    /** 带原因的判定：会话有效但租约被他人持有时返回 {@code LEASE_OCCUPIED}（页面据此提示，而不是要求重新登录）。 */
+    public record Resolution(InstanceSession session, ErrorCode reason) {
+    }
+
+    public Resolution resolveDetailed(String token, String instanceId, int port) {
+        Optional<InstanceSession> s = sessions.resolveInstance(token, instanceId, port);
+        if (s.isEmpty()) {
+            return new Resolution(null, ErrorCode.UNAUTHENTICATED);
+        }
+        ErrorCode reason = ensureBound(s.get());
+        return reason == null ? new Resolution(s.get(), null) : new Resolution(null, reason);
+    }
+
     /**
      * 确保会话绑定到当前租约：已绑定且有效直接返回 null；否则尝试为其父控制台会话重新获取租约。
      *

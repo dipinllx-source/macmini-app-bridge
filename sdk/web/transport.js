@@ -11,6 +11,7 @@
   const { encode, decode } = root.MmabCodec;
   const WS_PATH = '/__mmab/bridge/ws';
   const CALL_PATH = '/__mmab/bridge/call';
+  const STATUS_PATH = '/__mmab/bridge/status';
   const HEARTBEAT_MS = 15000;
   const DIAG_PATH = '/__mmab/bridge/diag';
   const DIAG_KEY = '__mmab_last_unload';
@@ -79,12 +80,14 @@
   }
 
   function closeMessage(code, reason) {
-    if (code === 1013) return 'macmini App 引桥：该实例已在另一个标签页打开（或本页过慢被断开）。请关闭另一个标签页后回到控制台重新打开。';
-    if (code === 1009) return 'macmini App 引桥：单帧超过 1 MiB，连接已关闭。';
-    // 1006（无关闭帧）/ QUEUE_LIMIT：多为网络中断或推送积压被平台断开；会话与租约仍在，刷新本页即可重连
-    if (code === 1006 || reason === 'QUEUE_LIMIT') {
-      return `macmini App 引桥连接意外中断（${reason || code}）。刷新本页即可重新连接；若刷新后仍失败，请回到控制台重新打开。`;
+    if (code === 1013 || reason === 'LEASE_OCCUPIED') {
+      return 'macmini App 引桥：该实例已在其他标签页或设备上打开。请关闭另一个页面后刷新本页，或回到控制台重新打开。';
     }
+    if (reason === 'UNAUTHENTICATED') return 'macmini App 引桥：登录已失效（过期或已注销）。请回到控制台重新登录后打开。';
+    if (reason === 'BLOCKED_UPGRADE' || reason === 'COMPATIBILITY_BLOCKED') {
+      return `macmini App 引桥：本地应用已升级，平台尚未适配（${reason}）。请在控制台查看详情。`;
+    }
+    if (code === 1009) return 'macmini App 引桥：单帧超过 1 MiB，连接已关闭。';
     return `macmini App 引桥连接已断开（${reason || code}）。请回到控制台重新打开。`;
   }
 
@@ -126,6 +129,11 @@
     if (typeof addEventListener === 'function') {
       addEventListener('pagehide', () => {
         unloading = true;
+        try {
+          if (ws && ws.readyState === WebSocket.OPEN) ws.close(1000, 'pagehide'); // 页面离开：干净关闭，平台不挂起
+        } catch {
+          // ignore
+        }
         const o = { e: 'unload', ...base() };
         beacon(o);
         try {
@@ -137,33 +145,49 @@
     }
     let queue = [];
     let seq = 0;
-    let closed = null;
+    let closed = null; // fatal reason once the page gave up
     let timer = null;
-    const ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + WS_PATH);
+    let ws = null;
+    let connectionId = null;
+    let everOpen = false;
+    let attempt = 0;
+    let retryTimer = null;
+    let reconnectingSince = null;
+    const MAX_QUEUED = 2048;
+    // retryable: no close frame / going away / server restart / adapter restart / lease or generation moved on.
+    // fatal: session gone, another tab, upgrade blocked, oversized frame (the server already explained why).
+    const FATAL_REASONS = new Set(['UNAUTHENTICATED', 'LEASE_OCCUPIED', 'BLOCKED_UPGRADE', 'COMPATIBILITY_BLOCKED',
+      'ORIGIN_REJECTED', 'HOST_REJECTED']);
+    const isFatal = (code, reason) => code === 1013 || code === 1009 || code === 1003 || FATAL_REASONS.has(reason);
 
-    const ready = new Promise((resolve, reject) => {
-      ws.addEventListener('open', () => {
-        stats.connected = true;
-        openedAt = Date.now();
-        for (const f of queue) ws.send(f);
-        queue = [];
-        timer = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) ws.send('{"kind":"HEARTBEAT"}');
-        }, HEARTBEAT_MS);
-        resolve();
-      }, { once: true });
-      ws.addEventListener('close', (ev) => reject(new BridgeError(ev.reason || `CLOSED_${ev.code}`)), { once: true });
-    });
+    let readyResolve;
+    let readyReject;
+    const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
     ready.catch(() => {});
 
     function sendFrame(frame) {
       const text = JSON.stringify(frame);
       if (closed) throw new BridgeError(closed);
-      if (ws.readyState === WebSocket.OPEN) ws.send(text);
-      else queue.push(text);
+      if (ws && ws.readyState === WebSocket.OPEN) ws.send(text);
+      else {
+        if (queue.length >= MAX_QUEUED) throw new BridgeError('QUEUE_LIMIT');
+        queue.push(text); // sent once (re)connected; never replays frames that already left
+      }
     }
 
-    ws.addEventListener('message', (ev) => {
+    function giveUp(code, reason) {
+      if (closed) return;
+      closed = reason || `CLOSED_${code}`;
+      clearTimeout(retryTimer);
+      queue = [];
+      for (const p of pending.values()) p.reject(new BridgeError(closed));
+      pending.clear();
+      readyReject(new BridgeError(closed));
+      banner(closeMessage(code, reason));
+      if (o.onClose) o.onClose(code, reason);
+    }
+
+    function onMessage(ev) {
       let f;
       try {
         f = JSON.parse(ev.data);
@@ -171,6 +195,15 @@
         return;
       }
       switch (f.kind) {
+        case 'HELLO': {
+          const previous = connectionId;
+          connectionId = typeof f.connectionId === 'string' ? f.connectionId : null;
+          if (previous && !f.resumed) {
+            // the server no longer has this page's ports / subscriptions: the app must start over
+            if (o.onLost) o.onLost();
+          }
+          return;
+        }
         case 'RESPONSE': {
           const p = pending.get(f.cid);
           if (!p) return;
@@ -218,20 +251,100 @@
           return;
         default:
       }
-    });
-    ws.addEventListener('close', (ev) => {
-      closed = ev.reason || `CLOSED_${ev.code}`;
-      stats.connected = false;
-      stats.closeCode = ev.code;
-      const d = { e: 'close', code: ev.code, clean: !!ev.wasClean, unl: unloading, ...base() };
-      if (/^[A-Z_]{1,40}$/.test(ev.reason || '')) d.reason = ev.reason;
-      beacon(d);
-      clearInterval(timer);
-      for (const p of pending.values()) p.reject(new BridgeError(closed));
-      pending.clear();
-      banner(closeMessage(ev.code, ev.reason));
-      if (o.onClose) o.onClose(ev.code, ev.reason);
-    });
+    }
+
+    function connect() {
+      const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + WS_PATH
+        + (connectionId ? `?resume=${encodeURIComponent(connectionId)}` : '');
+      const sock = new WebSocket(url);
+      ws = sock;
+      sock.addEventListener('open', () => {
+        if (ws !== sock) return;
+        stats.connected = true;
+        openedAt = Date.now();
+        everOpen = true;
+        attempt = 0;
+        reconnectingSince = null;
+        stats.reconnects = (stats.reconnects || 0) + (stats.opens ? 1 : 0);
+        stats.opens = (stats.opens || 0) + 1;
+        banner('', '__mmab_reconnect');
+        const q = queue;
+        queue = [];
+        for (const f of q) sock.send(f);
+        clearInterval(timer);
+        timer = setInterval(() => {
+          if (sock.readyState === WebSocket.OPEN) sock.send('{"kind":"HEARTBEAT"}');
+        }, HEARTBEAT_MS);
+        readyResolve();
+      }, { once: true });
+      sock.addEventListener('message', (ev) => { if (ws === sock) onMessage(ev); });
+      sock.addEventListener('close', (ev) => {
+        if (ws !== sock) return;
+        stats.connected = false;
+        stats.closeCode = ev.code;
+        clearInterval(timer);
+        const d = { e: 'close', code: ev.code, clean: !!ev.wasClean, unl: unloading, ...base() };
+        if (/^[A-Z_]{1,40}$/.test(ev.reason || '')) d.reason = ev.reason;
+        beacon(d);
+        // requests already on the wire: their outcome is unknown, they are NOT replayed
+        for (const p of pending.values()) p.reject(new BridgeError('DEADLINE_EXCEEDED'));
+        pending.clear();
+        if (unloading || closed) return;
+        if (isFatal(ev.code, ev.reason) || (!everOpen && ev.code !== 1006)) {
+          giveUp(ev.code, ev.reason);
+          return;
+        }
+        scheduleReconnect();
+      });
+    }
+
+    function hidden() {
+      return typeof document !== 'undefined' && document.visibilityState === 'hidden';
+    }
+
+    function scheduleReconnect() {
+      if (closed) return;
+      if (reconnectingSince === null) reconnectingSince = Date.now();
+      const delay = Math.min(15000, 1000 * 2 ** Math.min(attempt, 4));
+      attempt++;
+      clearTimeout(retryTimer);
+      retryTimer = setTimeout(() => {
+        if (Date.now() - reconnectingSince > 2000) {
+          banner('macmini App 引桥：连接中断，正在自动重新连接…', '__mmab_reconnect');
+        }
+        if (hidden()) return; // resumed by visibilitychange
+        probeThenConnect();
+      }, delay);
+    }
+
+    /** Ask the instance port why we were cut off before reopening (a failed WS handshake never says why). */
+    function probeThenConnect() {
+      const done = (status, reason) => {
+        if (status === 200) connect();
+        else if (status === 401) giveUp(1008, 'UNAUTHENTICATED');
+        else if (status === 409) giveUp(1013, 'LEASE_OCCUPIED');
+        else if (status === 503 && (reason === 'BLOCKED_UPGRADE' || reason === 'COMPATIBILITY_BLOCKED')) giveUp(1008, reason);
+        else scheduleReconnect(); // platform restarting / adapter not ready / network still down
+      };
+      if (typeof fetch !== 'function') {
+        connect();
+        return;
+      }
+      fetch(STATUS_PATH, { credentials: 'same-origin', cache: 'no-store' })
+        .then((r) => r.json().catch(() => ({})).then((j) => done(r.status, j && (j.reason || (j.error && j.error.code)))))
+        .catch(() => scheduleReconnect());
+    }
+
+    if (typeof document !== 'undefined' && document.addEventListener) {
+      document.addEventListener('visibilitychange', () => {
+        if (!hidden() && reconnectingSince !== null && !closed && !(ws && ws.readyState <= 1)) {
+          clearTimeout(retryTimer);
+          probeThenConnect();
+        }
+      });
+    }
+
+    connect();
 
     function request(op, value) {
       return requestRaw(op, encode(value), false);
@@ -276,10 +389,12 @@
       sendPortClose(port) {
         sendFrame({ kind: 'PORT_CLOSE', port });
       },
-      isOpen: () => ws.readyState === WebSocket.OPEN,
+      isOpen: () => !!ws && ws.readyState === WebSocket.OPEN,
       note,
       close() {
-        ws.close(1000, 'client');
+        closed = 'client';
+        clearTimeout(retryTimer);
+        if (ws) ws.close(1000, 'client');
       },
     };
   }
