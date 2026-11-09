@@ -35,7 +35,8 @@ import reactor.core.scheduler.Schedulers;
 public class ContentController {
 
     static final String SHIM_TAG = "<script type=\"module\" src=\"/__mmab/shim/shim.mjs\"></script>";
-    private static final long MAX_FILE_BYTES = 32L * 1024 * 1024;
+    /** 单个原版资源上限：千问 2.0.0 的 vendor 包约 37 MiB（M3 实机发现 32 MiB 上限导致白屏）。 */
+    private static final long MAX_FILE_BYTES = 96L * 1024 * 1024;
 
     /** 原版前端常见的其他静态类型（M3：真实应用资源）；未知类型仍为 octet-stream + nosniff。 */
     private static final java.util.Map<String, String> EXTRA_TYPES = java.util.Map.ofEntries(
@@ -86,7 +87,7 @@ public class ContentController {
         if (file.isEmpty() && !lastSegment(path).contains(".")) {
             file = resolve(consoleRoot, "/index.html"); // SPA 路由回落
         }
-        return file.map(this::read).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
+        return file.map(ContentController::read).orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
     }
 
     private ResponseEntity<byte[]> instance(String instanceId, String path, String bridgeOrigin) throws IOException {
@@ -95,7 +96,7 @@ public class ContentController {
             if (!scriptName(name)) {
                 throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
             }
-            return resolve(sdkRoot, name).map(this::read)
+            return resolve(sdkRoot, name).map(ContentController::read)
                     .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
         }
         InstanceRuntime rt = instances.get(instanceId)
@@ -105,7 +106,7 @@ public class ContentController {
             if (!scriptName(name) || name.indexOf('/', 1) >= 0 || rt.adapterRoot() == null) {
                 throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
             }
-            return resolve(rt.adapterRoot().resolve("shim"), name).map(this::read)
+            return resolve(rt.adapterRoot().resolve("shim"), name).map(ContentController::read)
                     .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
         }
         if (path.startsWith("/__mmab/")) {
@@ -202,16 +203,23 @@ public class ContentController {
         }
     }
 
-    private ResponseEntity<byte[]> read(Path file) {
+    static ResponseEntity<byte[]> read(Path file) {
         try {
             if (Files.size(file) > MAX_FILE_BYTES) {
                 throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
             }
-            byte[] body = Files.readAllBytes(file);
             String name = file.getFileName().toString();
-            return ResponseEntity.ok().contentType(contentType(name))
-                    .cacheControl(name.endsWith(".html") ? CacheControl.noStore() : CacheControl.noCache())
-                    .body(body);
+            if (name.endsWith(".html")) {
+                return ResponseEntity.ok().contentType(contentType(name)).cacheControl(CacheControl.noStore())
+                        .body(Files.readAllBytes(file));
+            }
+            // no-cache + 弱 ETag（大小 + 修改时间）：浏览器每次重新验证，未变化时 304，不必重传几十 MB 的包
+            java.nio.file.attribute.BasicFileAttributes a =
+                    Files.readAttributes(file, java.nio.file.attribute.BasicFileAttributes.class);
+            String etag = "W/\"" + Long.toHexString(a.size()) + "-" + Long.toHexString(a.lastModifiedTime().toMillis()) + "\"";
+            return ResponseEntity.ok().contentType(contentType(name)).cacheControl(CacheControl.noCache())
+                    .eTag(etag).lastModified(a.lastModifiedTime().toMillis())
+                    .body(Files.readAllBytes(file));
         } catch (IOException e) {
             throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
         }

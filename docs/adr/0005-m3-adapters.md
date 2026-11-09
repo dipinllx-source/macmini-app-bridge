@@ -1,6 +1,6 @@
 # ADR-0005：M3 参考适配器与证据闸门
 
-- 状态：进行中（2026-11-09）——平台缺口与千问适配器已完成离线验收；Codex 适配器未开始。
+- 状态：进行中（2026-11-09）——平台缺口完成；千问适配器已在正式实例上经平台完成界面与历史验收（发消息未验收）；Codex 适配器未开始。
 
 ## 1. 平台缺口（来自 ADR-0004 §3）
 
@@ -28,5 +28,11 @@
 ## 4. 已知偏差 / 后续
 
 - driver 只认默认 `mmab.data-dir`（适配器环境变量 `MMAB_*` 被平台清除，引导行尚不带数据目录）。
-- 千问实机验收（`isolated-live` 不适用：只有一个应用实例）需操作者批准后在正式实例上进行，结果写入 `docs/m3-acceptance.md`。
+- 千问实机验收已于 2026-11-09 经操作者批准完成（界面 / 历史，见 `docs/m3-acceptance.md`）；发消息需另行授权。
+
+## 5. 实机暴露的平台问题
+
+- 控制台端口的 Referrer-Policy 改为 `strict-origin`：`same-origin` 会让浏览器在跨端口开窗表单里发送 `Origin: null`，
+  与“exchange 只认控制台 Origin”的规则冲突。实例端口保持 `same-origin`。这推翻了设计稿中“统一 same-origin”的写法。
+- 原版资源单文件上限 96 MiB（32 MiB 时千问 vendor 包 404 白屏），非 HTML 资源带弱 ETag / Last-Modified。
 - Codex 适配器（S2：renderer CDP、app-host MessagePort、启动白名单、宿主请求过滤、≥700 帧突发）尚未实现。

@@ -35,7 +35,11 @@ import reactor.core.publisher.Mono;
  *   <li>控制台：写请求要求精确 Origin + CSRF 头；API 的 GET 要求 {@code Sec-Fetch-Site: same-origin}。</li>
  *   <li>实例：只有 {@code POST /__mmab/session/exchange} 接受控制台 Origin 的跨端口提交；其余资源要求
  *       本端口专属 Cookie 对应的有效会话；WS 升级要求精确的本端口 Origin；引导数据要求 same-origin。</li>
- *   <li>所有响应加 {@code Referrer-Policy: same-origin}、{@code Cross-Origin-Resource-Policy: same-origin}、
+ *   <li>所有响应加 {@code Cross-Origin-Resource-Policy: same-origin}、nosniff、禁止 framing；Referrer-Policy 见下。</li>
+ *   <li>Referrer-Policy：实例端口 {@code same-origin}；控制台端口 {@code strict-origin}——按 Fetch 规范，
+ *       {@code same-origin} 策略下跨源请求的 Origin 头会被序列化为 {@code null}，控制台向实例端口提交开窗表单时
+ *       exchange 便收不到控制台 Origin（真实 Chrome 实测 403）。{@code strict-origin} 只发送源、不带路径，
+ *       HTTPS→HTTP 降级时不发送。
  *       nosniff、禁止 framing。</li>
  * </ol>
  */
@@ -89,6 +93,7 @@ public class GuardFilter implements WebFilter {
             return deny(exchange, MISDIRECTED, ErrorCode.HOST_REJECTED);
         }
         exchange.getAttributes().put(MmabAttributes.ROLE, role.get());
+        out.set("Referrer-Policy", role.get().console() ? "strict-origin" : "same-origin");
         if (HttpMethod.OPTIONS.equals(req.getMethod())) {
             return deny(exchange, HttpStatus.FORBIDDEN, ErrorCode.ORIGIN_REJECTED);
         }

@@ -28,7 +28,20 @@
 | 浏览器 shim：Electron 表面、本地剪贴板 / 外链（仅 http/https）、主窗口 hash | 离线 | 同上 |
 | 从本机 App 包提取 renderer（464 个文件）+ preload 包装语法正确 | 独立实机（只读 App 包，写临时目录） | `tools/extract.mjs` 手工运行 |
 | 注入预检：正式实例参数精确匹配、信号证明与本机构建一致 | 实机（`--dry-run`，未发信号、未连接） | `tools/inject.mjs --dry-run` |
-| 真实注入、原版界面经平台渲染、历史会话、发消息 | **未验证** | 需操作者批准（见 `adapters/qwenwork/README.md`） |
+| 真实注入（经操作者批准）：SIGUSR1 按信号证明重开 inspector → 注入 → inspector 关闭复核；应用 PID 与启动时间不变；旧原型桥并存且仍可用 | 实机（2026-11-09，千问 2.0.0） | `tools/inject.mjs --reopen-inspector --signal-proof` |
+| 链路握手与引导、未知通道原文返回 | 实机 | driver link-client 直连 payload |
+| 控制台登录 → 票据 → 跨端口表单 exchange → 实例会话（真实 Chrome） | 实机（headless Chrome，证书按 SPKI 精确信任） | 见下方“实机发现” |
+| 原版界面经平台渲染：标题、`desktopApi` / `electronTRPC`、47 个按钮、输入框、无断线提示，0 未处理异常、0 console.error | 实机 | 同上；截图仅本地留存 |
+| 打开历史会话，消息列表加载（5 条） | 实机 | 同上 |
+| 能力闸门：`ui.render` / `ui.history` 证据升为 live 后无需操作者授权即开放 | 离线 + 实机 | `QwenworkDescriptorTest`；平台重启后复测同上 |
+| 发消息 / 流式回复（ui.compose、stream.push） | **未验证** | 会在账号中留下记录，需操作者另行授权 |
+| 语音（ASR 的 wasm 资源 401：疑为 worker 请求不带实例会话 Cookie） | **未验证 / 已知缺口** | `media.voice` 未开放 |
+| 另一台实体内网电脑访问 | **未验证** | |
+
+### 实机发现（已修复并补测试）
+
+1. **跨端口开窗被拒（403）**：控制台响应 `Referrer-Policy: same-origin`，按 Fetch 规范跨源请求的 Origin 会被序列化为 `null`，exchange 只认控制台 Origin。M1 测试用 JDK 客户端手填 Origin，未覆盖。修复：控制台端口改 `strict-origin`（只发源、不带路径），实例端口仍 `same-origin`；`MacminiAppBridgeApplicationTest`、`OfflineEndToEndTest` 断言更新。
+2. **白屏（vendor 包 404）**：千问 2.0.0 的 vendor 包约 37 MiB，超过 32 MiB 单文件上限。修复：上限 96 MiB；非 HTML 资源加弱 ETag + Last-Modified（`no-cache` 下可 304）；`ContentControllerTest` 新增 40 MiB 用例。
 
 ## Codex（S2）
 

@@ -36,5 +36,5 @@
 2. 预检（不发信号、不连接）：`node adapters/qwenwork/tools/inject.mjs --dry-run [--reopen-inspector --signal-proof <file>]`
 3. 注入：`node adapters/qwenwork/tools/inject.mjs [--reopen-inspector --signal-proof <file>]`
    payload 与已有的其他进程内桥共存（独立全局名、独立 tRPC id 段），不中断它们。
-4. 平台配置 `qwen-01`：`enabled: true`；离线证据阶段需显式 `verify-capabilities: [ui.render]` 才会开放（ADR-0005）。
+4. 平台配置 `qwen-01`：`enabled: true`（`ui.render` / `ui.history` 已有 live 证据，无需 `verify-capabilities`）。
 5. 回滚：`node adapters/qwenwork/tools/inject.mjs --stop [--reopen-inspector --signal-proof <file>]` 停止 payload、删除交接文件；或直接重启应用（payload 不持久化）。

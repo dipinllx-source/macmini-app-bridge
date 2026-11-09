@@ -51,6 +51,7 @@ class MacminiAppBridgeApplicationTest {
                 "\"status\":\"m1-offline\"", "\"version\":\"0.1.0-SNAPSHOT\"", "\"adapterProtocol\":\"1.0-draft\"",
                 "\"registeredInstances\":3");
         assertThat(r.headers().firstValue("Cross-Origin-Resource-Policy")).contains("same-origin");
-        assertThat(r.headers().firstValue("Referrer-Policy")).contains("same-origin");
+        // 控制台端口用 strict-origin：same-origin 会让跨端口开窗表单的 Origin 变成 null（ADR-0005 §5）
+        assertThat(r.headers().firstValue("Referrer-Policy")).contains("strict-origin");
     }
 }

@@ -1,6 +1,7 @@
 # MMAB adapter descriptor - 千问（qwenwork，策略族 S1：主进程注入）
-# 能力状态取自原型验收结论；evidence 是“经平台路径”的最强证据。当前只有离线证据，
-# 因此 SUPPORTED 的能力在平台上仍不开放，直到完成实机验收或操作者对实例显式授权（ADR-0005）。
+# 能力状态取自原型验收结论；evidence 是“经平台路径”的最强证据（ADR-0005）。
+# 2026-11-09 已在正式实例（千问 2.0.0）上经平台完成界面渲染与历史会话验收（docs/m3-acceptance.md），
+# 因此 ui.render / ui.history 为 live；发消息（ui.compose）尚未经平台验收。
 schemaVersion: 1
 appId: qwenwork
 displayName: 千问
@@ -49,7 +50,7 @@ web:
     - adapter:qwen-electron.js
     - resource:/mmab-preload.js
 evidence:
-  ui.render: offline
-  ui.history: offline
+  ui.render: live      # 2026-11-09 正式实例：原版界面、desktopApi / electronTRPC、47 个按钮、输入框，0 未处理异常
+  ui.history: live     # 2026-11-09 正式实例：打开历史会话，消息列表加载
 resources:
   source: extract-from-app-bundle

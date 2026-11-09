@@ -41,4 +41,24 @@ class ContentControllerTest {
                         + "<title>t</title></head></html>");
         assertThat(ContentController.injectShim("<p>no head</p>")).startsWith(ContentController.SHIM_TAG);
     }
+
+    @Test
+    void largeAssetsAreServedWithValidatorsAndHtmlIsNeverCached() throws Exception {
+        // 千问 2.0.0 的 vendor 包约 37 MiB：旧的 32 MiB 上限让它 404，整页白屏（M3 实机发现）
+        Path big = tmp.resolve("vendor.js");
+        try (var ch = java.nio.channels.FileChannel.open(big, java.nio.file.StandardOpenOption.CREATE_NEW,
+                java.nio.file.StandardOpenOption.WRITE)) {
+            ch.write(java.nio.ByteBuffer.wrap(new byte[] {1}), 40L * 1024 * 1024 - 1);
+        }
+        var r = ContentController.read(big);
+        assertThat(r.getBody()).hasSize(40 * 1024 * 1024);
+        assertThat(r.getHeaders().getETag()).startsWith("W/\"");
+        assertThat(r.getHeaders().getLastModified()).isPositive();
+        assertThat(r.getHeaders().getCacheControl()).isEqualTo("no-cache");
+
+        Path html = Files.writeString(tmp.resolve("index.html"), "<html></html>");
+        var h = ContentController.read(html);
+        assertThat(h.getHeaders().getCacheControl()).isEqualTo("no-store");
+        assertThat(h.getHeaders().getETag()).isNull();
+    }
 }

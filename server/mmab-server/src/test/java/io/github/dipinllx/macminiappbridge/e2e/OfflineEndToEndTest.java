@@ -376,6 +376,8 @@ class OfflineEndToEndTest {
         assertThat(page.headers().firstValue("x-frame-options")).contains("DENY");
         assertThat(page.headers().firstValue("content-security-policy").orElse("")).contains("frame-ancestors 'none'");
         HttpResponse<String> consolePage = rawGet(console("/"), null, null);
+        // 控制台页必须让浏览器在跨端口开窗表单里带上控制台 Origin：same-origin / no-referrer 会让它变成 null
+        assertThat(consolePage.headers().firstValue("referrer-policy")).contains("strict-origin");
         assertThat(consolePage.headers().firstValue("content-security-policy").orElse(""))
                 .contains("form-action 'self' ").contains(origin("mock-01")).contains(origin("mock-02"))
                 .contains("frame-ancestors 'none'");
