@@ -226,6 +226,18 @@ public class SessionService {
         }
     }
 
+    private volatile Instant lastPurge = Instant.EPOCH;
+
+    /** 维护清扫调用：每小时最多清理一次库中已撤销 / 已过期的会话。 */
+    public int purgeStoreIfDue() {
+        Instant now = clock.instant();
+        if (now.isBefore(lastPurge.plus(Duration.ofHours(1)))) {
+            return 0;
+        }
+        lastPurge = now;
+        return purgeStore();
+    }
+
     /** 清理库中已撤销 / 已过期的会话（维护任务，低频调用）。 */
     public int purgeStore() {
         Instant now = clock.instant();

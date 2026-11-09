@@ -23,6 +23,12 @@ public class MaintenanceSweeper implements SmartLifecycle {
     private final LaunchTicketService tickets;
     private final io.github.dipinllx.macminiappbridge.proxy.TransportRegistry transports;
     private final long intervalMillis;
+    private io.github.dipinllx.macminiappbridge.audit.AuditLog audit;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setAudit(io.github.dipinllx.macminiappbridge.audit.AuditLog audit) {
+        this.audit = audit;
+    }
     private ScheduledExecutorService executor;
 
     public MaintenanceSweeper(LeaseManager leases, SessionService sessions, LaunchTicketService tickets,
@@ -42,6 +48,10 @@ public class MaintenanceSweeper implements SmartLifecycle {
             tickets.sweep();
             transports.reapIdlePorts();
             transports.sweepSuspended();
+            if (audit != null) {
+                audit.purgeExpired();
+                sessions.purgeStoreIfDue();
+            }
         } catch (RuntimeException e) {
             log.warn("sweep failed: {}", e.getClass().getSimpleName());
         }
