@@ -102,3 +102,32 @@ export async function openInstance(id: string): Promise<void> {
     form.remove()
   }
 }
+
+export interface AuditRow {
+  seq: number
+  at: string | number
+  actor: string
+  action: string
+  instance: string
+  result: string
+  detail: string
+}
+
+export function listAudit(params: { limit?: number; before?: number; instance?: string; action?: string } = {}) {
+  const q = new URLSearchParams()
+  if (params.limit) q.set('limit', String(params.limit))
+  if (params.before) q.set('before', String(params.before))
+  if (params.instance) q.set('instance', params.instance)
+  if (params.action) q.set('action', params.action)
+  const s = q.toString()
+  return call<{ events: AuditRow[]; nextBefore: number | null; dropped: number }>('GET', `/audit${s ? `?${s}` : ''}`)
+}
+
+/** 注销所有会话（需要再次输入口令）。之后本页也需要重新登录。 */
+export async function revokeAll(password: string): Promise<void> {
+  try {
+    await call<void>('POST', '/auth/revoke-all', { password })
+  } finally {
+    csrfToken = null
+  }
+}

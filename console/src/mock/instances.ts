@@ -63,9 +63,3 @@ export const MOCK_INSTANCES: MockInstance[] = [
     },
   },
 ]
-
-export const MOCK_AUDIT = [
-  { at: '2026-01-01 10:00:00', actor: 'operator', action: 'lease.acquire', instance: 'codex-01', result: 'OK' },
-  { at: '2026-01-01 10:00:05', actor: 'operator', action: 'launch-ticket.exchange', instance: 'codex-01', result: 'OK' },
-  { at: '2026-01-01 10:02:11', actor: 'browser-tab-2', action: 'lease.acquire', instance: 'codex-01', result: 'LEASE_OCCUPIED' },
-]

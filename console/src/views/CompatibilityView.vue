@@ -5,6 +5,7 @@ const store = useInstancesStore()
 </script>
 
 <template>
+  <div class="dex-card sample">🚧 示例数据：这一页将在“控制台真实状态”任务中接入真实数据。</div>
   <el-table :data="store.items" size="small">
     <el-table-column prop="displayName" label="应用" />
     <el-table-column prop="appVersion" label="应用版本" />
@@ -16,4 +17,8 @@ const store = useInstancesStore()
 
 <style scoped>
 .hint { color: var(--el-text-color-secondary); font-size: 13px; }
+</style>
+
+<style scoped>
+.sample { padding: 10px 14px; margin-bottom: 14px; font-weight: 700; font-size: 13px; background: #fff6d6; }
 </style>

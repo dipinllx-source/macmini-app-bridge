@@ -1,0 +1,113 @@
+/*
+ * macmini App 引桥 控制台主题：“掌上图鉴”风格。
+ * 视觉灵感来自经典掌机图鉴 / 怪兽收集类游戏的配色与圆润造型（红色机身、蓝色镜头灯、属性徽章、HP 条），
+ * 全部为原创 CSS / SVG，不包含任何第三方角色、标志或素材。
+ */
+:root {
+  --dex-red: #e3350d;
+  --dex-red-dark: #b3260a;
+  --dex-cream: #fff8ec;
+  --dex-ink: #2b2d42;
+  --dex-ink-soft: #5c6178;
+  --dex-line: #2b2d42;
+  --dex-blue: #3fa9f5;
+  --dex-yellow: #ffcb05;
+  --dex-yellow-dark: #c7a008;
+  --dex-green: #4cd964;
+  --dex-hp-green: #3ad15a;
+  --dex-hp-yellow: #f6c23e;
+  --dex-hp-red: #ef4b4b;
+  --dex-card: #ffffff;
+  --dex-shadow: 0 4px 0 rgba(43, 45, 66, 0.9);
+  --dex-radius: 18px;
+
+  --type-inject: #f08030;
+  --type-cdp: #f8d030;
+  --type-mock: #a8a878;
+  --type-unknown: #68a090;
+
+  --el-color-primary: var(--dex-red);
+  --el-border-radius-base: 12px;
+}
+
+html, body { margin: 0; background: var(--dex-cream); color: var(--dex-ink); }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  background-image:
+    radial-gradient(circle at 12px 12px, rgba(227, 53, 13, 0.06) 3px, transparent 4px);
+  background-size: 28px 28px;
+}
+
+/* 圆润粗描边的卡片 */
+.dex-card {
+  background: var(--dex-card);
+  border: 3px solid var(--dex-line);
+  border-radius: var(--dex-radius);
+  box-shadow: var(--dex-shadow);
+}
+
+.dex-title {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+}
+
+/* 属性徽章 */
+.type-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 10px; border-radius: 999px;
+  border: 2px solid var(--dex-line);
+  font-size: 12px; font-weight: 800; color: #fff;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+.type-badge.inject { background: var(--type-inject); }
+.type-badge.cdp { background: var(--type-cdp); color: var(--dex-ink); text-shadow: none; }
+.type-badge.mock { background: var(--type-mock); }
+.type-badge.unknown { background: var(--type-unknown); }
+
+/* 能力（技能）药丸 */
+.skill {
+  display: inline-block; margin: 0 6px 6px 0; padding: 2px 9px; border-radius: 8px;
+  font-size: 12px; font-weight: 700; border: 2px solid transparent;
+}
+.skill.SUPPORTED { background: #e3fbe7; border-color: #3ad15a; color: #17752c; }
+.skill.UNVERIFIED { background: #fff6d6; border-color: #f6c23e; color: #8a6400; }
+.skill.DISABLED { background: #eef0f6; border-color: #b7bccd; color: #6b7086; }
+.skill.UNSUPPORTED { background: #f6f6f6; border-color: #dcdcdc; color: #a0a0a0; text-decoration: line-through; }
+
+/* HP 条 */
+.hp { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 800; }
+.hp-label { color: var(--dex-yellow-dark); letter-spacing: 0.06em; }
+.hp-track {
+  flex: 1; height: 12px; border-radius: 999px; background: #e8e8ee;
+  border: 2px solid var(--dex-line); overflow: hidden;
+}
+.hp-fill { height: 100%; border-radius: 999px; transition: width 0.8s cubic-bezier(.2,.9,.2,1.2), background 0.4s; }
+.hp-fill.green { background: linear-gradient(180deg, #6ee77f, var(--dex-hp-green)); }
+.hp-fill.yellow { background: linear-gradient(180deg, #ffe07a, var(--dex-hp-yellow)); }
+.hp-fill.red { background: linear-gradient(180deg, #ff8080, var(--dex-hp-red)); }
+.hp-fill.grey { background: #c7cad6; }
+.hp-fill.pulse { animation: hp-pulse 1.2s ease-in-out infinite; }
+@keyframes hp-pulse { 50% { opacity: 0.55; } }
+
+/* 主按钮：黄色“出发”按钮 */
+.go-btn {
+  appearance: none; cursor: pointer;
+  padding: 8px 18px; border-radius: 999px;
+  border: 3px solid var(--dex-line); background: var(--dex-yellow);
+  color: var(--dex-ink); font-weight: 900; font-size: 14px; letter-spacing: 0.05em;
+  box-shadow: 0 3px 0 var(--dex-line);
+  transition: transform 0.12s, box-shadow 0.12s;
+}
+.go-btn:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 5px 0 var(--dex-line); }
+.go-btn:active:not(:disabled) { transform: translateY(2px); box-shadow: 0 1px 0 var(--dex-line); }
+.go-btn:disabled { cursor: not-allowed; background: #e4e4ea; color: #9a9db0; }
+.go-btn.ghost { background: #fff; }
+
+/* 漂浮 / 弹跳 */
+@keyframes floaty { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+@keyframes pop-in { 0% { transform: scale(0.85); opacity: 0; } 70% { transform: scale(1.03); } 100% { transform: scale(1); opacity: 1; } }
+.pop-in { animation: pop-in 0.45s cubic-bezier(.2,.9,.2,1.2) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
