@@ -23,7 +23,7 @@ risk:
     - 独立 user-data-dir 不保证账号隔离（系统级凭据可能共享）
     - 只附加到专用实例（精确可执行文件 + 精确 user-data-dir + 仅回环调试端口），从不附加操作者的正常 Codex
 capabilities:
-  ui.render: SUPPORTED       # 原型：原版界面（登录后输入框可见）
+  ui.render: SUPPORTED       # 原型 + 平台路径专用实例：原版界面（输入框可见）
   ui.history: UNVERIFIED
   ui.compose: UNVERIFIED
   stream.push: UNVERIFIED
@@ -52,6 +52,6 @@ web:
     - platform:ports.js
     - adapter:codex-bridge.js
 evidence:
-  ui.render: offline
+  ui.render: isolated-live   # 2026-11-09 专用实例（Codex 26.1103.41825）经平台：原版界面、29 个按钮、输入框、470 个端口帧，0 未处理异常
 resources:
   source: extract-from-app-bundle

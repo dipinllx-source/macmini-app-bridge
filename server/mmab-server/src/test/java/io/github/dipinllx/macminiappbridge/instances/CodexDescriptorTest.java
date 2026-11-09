@@ -4,9 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.github.dipinllx.macminiappbridge.TestSupport;
 import io.github.dipinllx.macminiappbridge.protocol.ErrorCode;
-import io.github.dipinllx.macminiappbridge.protocol.StandardCapability;
 import io.github.dipinllx.macminiappbridge.protocol.StrategyFamily;
-import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 /** M3：Codex 参考适配器的描述文件——S2 表面、注入顺序、Git 能力单独闸门。 */
@@ -20,7 +18,8 @@ class CodexDescriptorTest {
         assertThat(d.web().inject()).containsExactly("platform:codec.js", "platform:transport.js", "platform:ports.js",
                 "adapter:codex-bridge.js");
 
-        AdapterDescriptor granted = d.withGrants(Set.of(StandardCapability.UI_RENDER));
+        // isolated-live evidence on the platform path: ui.render opens without an operator grant
+        AdapterDescriptor granted = d;
         assertThat(granted.gateSyncRequest("codex.bootstrap")).isEmpty();
         assertThat(granted.gateRequest("codex.connectAppHost")).isEmpty();
         assertThat(granted.eventAllowed("codex.hostMessage")).isTrue();

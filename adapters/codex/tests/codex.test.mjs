@@ -10,6 +10,7 @@ import '../../../sdk/web/ports.js';
 import { inProcess, platform } from '../../../sdk/driver-node/testing/platform-client.mjs';
 import { createDriver } from '../driver/main.mjs';
 import { payloadSource } from '../driver/renderer-link.mjs';
+import { userDataDir } from '../driver/process-check.mjs';
 
 const { encode, decode, PortRef } = globalThis.MmabCodec;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -279,4 +280,13 @@ test('browser shim: electronBridge surface, app-host handoff through the relay, 
   o.onEvent('codex.theme', 'dark', encode('dark'));
   assert.equal(b.getSystemThemeVariant(), 'dark');
   o.onClose();
+});
+
+test('dedicated profile is parsed from unquoted ps output, including paths with spaces', () => {
+  const p = '/Users/u/Library/Application Support/MacminiAppBridge/codex/profile';
+  assert.equal(userDataDir(`--user-data-dir=${p} --remote-debugging-address=127.0.0.1 --remote-debugging-port=9341`), p);
+  assert.equal(userDataDir(`--remote-debugging-port=9341 --user-data-dir=${p}`), p);
+  assert.equal(userDataDir('--remote-debugging-port=9341'), null, 'normal instance: no profile');
+  assert.equal(userDataDir(`--user-data-dir=/a --user-data-dir=${p}`), null, 'ambiguous');
+  assert.equal(userDataDir(`--x-user-data-dir=${p}`), null);
 });

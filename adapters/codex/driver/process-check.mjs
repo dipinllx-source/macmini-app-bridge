@@ -31,6 +31,21 @@ export function defaultProfile() {
   return path.join(defaultDataDir(), 'codex', 'profile');
 }
 
+/**
+ * The single --user-data-dir value from a `ps -o args=` line. ps does not quote, and the default profile lives under
+ * "Application Support", so the value runs until the next " --" option. More than one occurrence -> null.
+ */
+export function userDataDir(argLine) {
+  const flag = '--user-data-dir';
+  const hits = argLine.split(flag).length - 1;
+  if (hits !== 1) return null;
+  const start = argLine.indexOf(`${flag}=`);
+  if (start < 0 || (start > 0 && argLine[start - 1] !== ' ')) return null;
+  const rest = argLine.slice(start + flag.length + 1);
+  const end = rest.indexOf(' --');
+  return end < 0 ? rest : rest.slice(0, end);
+}
+
 export function listeners(port) {
   const out = run('/usr/sbin/lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fpn']);
   const pids = new Set();
@@ -58,8 +73,7 @@ export function verifyDedicated(port, profile) {
   const args = run('/bin/ps', ['-p', String(pid), '-o', 'args=']).trim();
   const started = run('/bin/ps', ['-p', String(pid), '-o', 'lstart=']).trim();
   if (exe !== EXECUTABLE || !args.startsWith(`${EXECUTABLE} `)) throw new CheckError('PORT_OWNER_MISMATCH', 'not the Codex executable');
-  const dirs = args.slice(EXECUTABLE.length + 1).split(' ').filter((a) => a.startsWith('--user-data-dir'));
-  if (dirs.length !== 1 || dirs[0] !== `--user-data-dir=${path.resolve(profile)}`) {
+  if (userDataDir(args.slice(EXECUTABLE.length + 1)) !== path.resolve(profile)) {
     throw new CheckError('PORT_OWNER_MISMATCH', 'not the dedicated profile');
   }
   return { pid, started };

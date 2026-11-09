@@ -4,7 +4,7 @@
 
 应用本身不改、不重写，也不是截图流远程桌面：浏览器运行应用自己的 HTML/CSS/JS，平台负责接入、鉴权、通道、生命周期和审计。
 
-> **当前状态：M1 离线协议与安全骨架已完成（2026-11-07）；M3 进行中——千问已经平台在正式实例上完成界面与历史验收（2026-11-09）；Codex 未开始。**
+> **当前状态：M1 离线协议与安全骨架已完成（2026-11-07）；M3 进行中——千问（正式实例：界面 / 历史）与 Codex（专用实例：界面）已经平台验收（2026-11-09）；发消息尚未验收。**
 > 平台已实现开窗票据、每端口独立会话 Cookie、Origin / CSRF / Fetch Metadata 防护、独占租约与 generation fencing、
 > Adapter Protocol v1（内部认证、envelope、能力四态、mmab-sv1 codec）、有界队列与慢客户端隔离，并用 **mock 适配器 + 固定
 > fixture 页面**做了端到端离线测试。**仍未接入任何真实应用（千问 / Codex 均未连接），不能用于远程访问。**
@@ -120,7 +120,7 @@ java -jar server/mmab-server/target/mmab-server-*.jar --spring.profiles.active=o
 | M0 | 设计与证据冻结 | 完成 |
 | M1 | 离线协议与安全骨架：mock 适配器、票据、租约、Origin/CSRF、codec、队列测试 | **完成（离线）**：见 [验收对照](docs/m1-acceptance.md)；真实浏览器验证未做 |
 | M2 | 观察模式：只发现和展示实例，不接管 | 未开始 |
-| M3 | 内部认证与入口切换：两个参考适配器按规范封装 | **进行中**：平台缺口完成；千问经平台实机验收界面 / 历史（发消息未验收）；Codex 未开始；见 [验收对照](docs/m3-acceptance.md)、[ADR-0005](docs/adr/0005-m3-adapters.md) |
+| M3 | 内部认证与入口切换：两个参考适配器按规范封装 | **进行中**：平台缺口完成；千问经平台实机验收界面 / 历史；Codex 经平台专用实例验收界面；发消息 / Git 未验收；见 [验收对照](docs/m3-acceptance.md)、[ADR-0005](docs/adr/0005-m3-adapters.md) |
 | M4 | 原版页面与版本验收（SETUP / AUTH / TRANSPORT / RENDER） | 未开始 |
 | M5 | 受控业务验收与运维闭环（恢复、升级阻塞、回滚） | 未开始 |
 | M6 | 可选：iframe 嵌入、多节点 | 未开始 |

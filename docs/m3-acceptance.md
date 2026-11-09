@@ -52,4 +52,15 @@
 
 ## Codex（S2）
 
-未开始。
+| 项 | 证据 | 测试 / 说明 |
+|---|---|---|
+| 启动快照、只读读取白名单、`ready` 与 3 个启动读取；其他视图消息不到达本机 | 离线 | `adapters/codex/tests/codex.test.mjs` |
+| app-host MessageChannel 双向中继：嵌套端口（`n` 空间）、Date / Uint8Array / BigInt | 离线 | 同上 |
+| 宿主消息镜像过滤（`*-request` / `codex_desktop:*` / 分片 / 带端口）；主题事件 | 离线 | 同上 |
+| Git 端口只交给发起连接；非法 requestId 拒绝；`app.git` 未开放 | 离线 | 同上、`CodexDescriptorTest` |
+| 800 帧启动突发按序到达、连接不断 | 离线 | 同上 |
+| 专用实例核验（含路径带空格的 profile）；正常实例不匹配 | 离线 + 独立实机 | 同上；`tools/launch.mjs` |
+| 原版界面经平台渲染：标题、`electronBridge`、29 个按钮、输入框、471 个端口帧、无断线 / 启动超时提示，0 未处理异常 | **独立实机**（全新专用实例，Codex 26.1103.41825） | headless Chrome，证书按 SPKI 精确信任 |
+| 应用自身的 Statsig 外网请求失败（1 条 console.error） | 已知、非阻断 | 原型同样存在；未放宽 CSP |
+| 历史会话、发消息、Git 操作 | **未验证** | 需操作者授权 |
+| 独立 profile 是否隔离账号 | **否（实测）** | 全新 profile 启动即为已登录状态 |
