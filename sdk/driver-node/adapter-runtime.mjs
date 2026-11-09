@@ -18,7 +18,7 @@ import { decode, encode, CodecError, CODEC_VERSION } from '../web/codec.mjs';
 import { envelopeProblem, NO_LEASE, PLATFORM_CONNECTION, PROTOCOL_VERSION } from './envelope.mjs';
 import {
   ADAPTER_TO_PLATFORM, HANDSHAKE_TIMEOUT_MS, LineSplitter, MAX_HANDSHAKE_LINE_BYTES, MAX_WIRE_LINE_BYTES,
-  PLATFORM_TO_ADAPTER, WireError, adapterProof, decodeFrame, encodeFrame, newNonce, platformProof, safeEqual,
+  MAX_FRAME_BYTES, PLATFORM_TO_ADAPTER, WireError, adapterProof, decodeFrame, encodeFrame, newNonce, platformProof, safeEqual,
   sessionKey,
 } from './wire.mjs';
 
@@ -173,6 +173,22 @@ export async function runAdapter(opts) {
     const send = (env) => {
       writeChain = writeChain.then(() => new Promise((resolve) => {
         if (sock.destroyed) return resolve();
+        // A frame over the wire limit would make the platform drop the WHOLE adapter link (every browser
+        // connection). Contain it instead: a response becomes a QUEUE_LIMIT error, an event / port frame closes
+        // only its own browser connection. Sizes only are reported, never content.
+        if (Buffer.byteLength(env.payload ?? '', 'utf8') > MAX_FRAME_BYTES) {
+          process.stderr.write(`[mmab-adapter] oversize ${env.messageKind} ${env.operation ?? ''} `
+            + `payloadBytes=${Buffer.byteLength(env.payload, 'utf8')} connection=${env.connectionId}\n`);
+          if (env.messageKind === 'RESPONSE') {
+            env = { ...env, payload: '', error: { code: 'QUEUE_LIMIT' } };
+          } else if (env.connectionId && env.connectionId !== PLATFORM_CONNECTION) {
+            env = { ...env, messageKind: 'CONTROL', operation: 'mmab.close', streamId: undefined, payload: '',
+              error: { code: 'QUEUE_LIMIT' } };
+            connections.delete(env.connectionId);
+          } else {
+            return resolve();
+          }
+        }
         const line = `${encodeFrame(sk, ADAPTER_TO_PLATFORM, ++outN, env)}\n`;
         if (sock.write(line)) resolve();
         else sock.once('drain', resolve);

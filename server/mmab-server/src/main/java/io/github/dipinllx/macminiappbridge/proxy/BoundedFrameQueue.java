@@ -68,9 +68,18 @@ public final class BoundedFrameQueue<T> {
 
         /** 适配器 → 浏览器：出站缓冲 4 MiB 即判慢客户端（设计 §9.3 起始值）。 */
         public static Budget outbound() {
-            return new Budget(AdapterProtocol.MAX_QUEUED_FRAMES, AdapterProtocol.SLOW_CLIENT_BUFFERED_BYTES,
-                    AdapterProtocol.MAX_WIRE_LINE_BYTES, AdapterProtocol.CONTROL_RESERVED_FRAMES,
-                    AdapterProtocol.CONTROL_RESERVED_BYTES, 0.75, 0.25);
+            return outbound(AdapterProtocol.MAX_QUEUED_FRAMES, AdapterProtocol.SLOW_CLIENT_BUFFERED_BYTES);
+        }
+
+        /** 适配器 → 浏览器，可配置帧数 / 字节上限（{@code mmab.transport.*}）；单帧上限仍是线路上限。 */
+        public static Budget outbound(int maxFrames, long maxBytes) {
+            return new Budget(maxFrames, maxBytes, AdapterProtocol.MAX_WIRE_LINE_BYTES,
+                    AdapterProtocol.CONTROL_RESERVED_FRAMES, AdapterProtocol.CONTROL_RESERVED_BYTES, 0.75, 0.25);
+        }
+
+        @Override
+        public String toString() {
+            return "frames<=" + maxFrames + " bytes<=" + maxBytes + " frameBytes<=" + maxFrameBytes;
         }
     }
 

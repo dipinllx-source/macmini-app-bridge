@@ -119,3 +119,33 @@ test('when the platform link drops every connection is forgotten', async () => {
   assert.deepEqual(closed, ['c-1']);
   await adapter.close();
 });
+
+test('oversize frames are contained: response -> QUEUE_LIMIT error, event -> only that connection closed', async () => {
+  const big = 'x'.repeat(1024 * 1024 + 10);
+  const adapter = await inProcess({
+    handlers: {
+      'test.big': () => big,
+      'test.ok': () => 'ok',
+      'test.bigEvent': async (v, ctx) => { await ctx.api.emit(ctx.connectionId, 'test.evt', big); return 'sent'; },
+    },
+  });
+  const p = await platform(adapter);
+  p.fence('lease-1', 1);
+  try {
+    const r = await p.response(p.request('c-1', 'test.big', encode(undefined)));
+    assert.equal(r.error.code, 'QUEUE_LIMIT');
+    assert.equal(r.payload, '');
+    // the adapter link is still alive for everybody
+    assert.equal(decode((await p.response(p.request('c-2', 'test.ok', encode(undefined)))).payload), 'ok');
+
+    p.request('c-3', 'test.bigEvent', encode(undefined));
+    const ctl = await p.nextWhere((e) => e.messageKind === 'CONTROL' && e.connectionId === 'c-3');
+    assert.equal(ctl.operation, 'mmab.close');
+    assert.equal(ctl.error.code, 'QUEUE_LIMIT');
+    assert.equal(decode((await p.response(p.request('c-2', 'test.ok', encode(undefined)))).payload), 'ok');
+    assert.ok(!adapter.api.connections().includes('c-3'), 'closed connection forgotten');
+  } finally {
+    p.close();
+    await adapter.close();
+  }
+});

@@ -155,7 +155,7 @@ function transportSandbox({ xhrResponse = { status: 200, body: '{"payload":"1"}'
     readyState: 'complete',
     body: { appendChild: (n) => nodes.set(n.id, n) },
     getElementById: (id) => nodes.get(id),
-    createElement: () => ({ style: {}, setAttribute() {} }),
+    createElement: () => ({ style: {}, setAttribute() {}, children: [], appendChild(c) { this.children.push(c); }, addEventListener() {} }),
     addEventListener() {},
   };
   const ctx = vm.createContext({
@@ -199,6 +199,19 @@ test('transport queues until open, matches responses, routes events / port frame
   await assert.rejects(dangling, (e) => e.code === 'LEASE_OCCUPIED');
   assert.match(nodes.get('__mmab_banner').textContent, /另一个标签页/);
   assert.throws(() => t.sendPortData('n1', '1'), (e) => e.code === 'LEASE_OCCUPIED');
+  assert.equal(nodes.get('__mmab_banner').children.length, 0, 'occupied: no reload button');
+});
+
+test('abnormal close (1006) tells the user a reload reconnects and offers a button', () => {
+  const { ctx, sockets, nodes } = transportSandbox();
+  ctx.MmabTransport.create();
+  sockets[0].open();
+  sockets[0].shut(1006, '');
+  const b = nodes.get('__mmab_banner');
+  assert.match(b.textContent, /1006/);
+  assert.match(b.textContent, /刷新本页即可重新连接/);
+  assert.equal(b.children.length, 1);
+  assert.equal(b.children[0].textContent, '刷新重连');
 });
 
 test('transport sync call uses the sync endpoint and surfaces gateway errors', () => {

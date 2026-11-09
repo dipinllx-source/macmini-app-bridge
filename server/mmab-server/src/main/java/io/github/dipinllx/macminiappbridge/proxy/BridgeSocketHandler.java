@@ -31,6 +31,8 @@ public class BridgeSocketHandler {
     private final MmabClock clock;
     private final Duration requestDeadline;
 
+    private final BoundedFrameQueue.Budget outboundBudget;
+
     public BridgeSocketHandler(InstanceRegistry instances, TransportRegistry transports, InstanceAccess access,
             LeaseManager leases, AuditLog audit, MmabClock clock, MmabProperties properties) {
         this.instances = instances;
@@ -40,6 +42,8 @@ public class BridgeSocketHandler {
         this.audit = audit;
         this.clock = clock;
         this.requestDeadline = properties.timeouts().requestDeadline();
+        this.outboundBudget = BoundedFrameQueue.Budget.outbound(properties.transport().outboundMaxFrames(),
+                properties.transport().outboundMaxBytes());
     }
 
     public Mono<Void> serve(WebSocketSession ws, InstanceSession session) {
@@ -52,7 +56,7 @@ public class BridgeSocketHandler {
             return ws.close(new CloseStatus(BridgeConnection.CLOSE_POLICY, invalid.name()));
         }
         BridgeConnection c = new BridgeConnection(Tokens.shortId("c-"), session, rt, ws, access, leases, audit, clock,
-                requestDeadline);
+                requestDeadline, outboundBudget);
         if (!transports.attach(c)) {
             audit.record(session.id(), "transport.open", session.instanceId(), ErrorCode.LEASE_OCCUPIED.name(), null);
             return ws.close(new CloseStatus(BridgeConnection.CLOSE_OCCUPIED, ErrorCode.LEASE_OCCUPIED.name()));

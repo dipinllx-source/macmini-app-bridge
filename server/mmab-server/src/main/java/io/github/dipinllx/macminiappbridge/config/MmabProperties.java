@@ -31,7 +31,7 @@ import org.springframework.boot.context.properties.bind.ConstructorBinding;
 @ConfigurationProperties(prefix = "mmab")
 public record MmabProperties(Platform platform, Console console, List<Instance> instances, Web web,
         Timeouts timeouts, List<AdapterPackage> adapters, Operator operator, Testing testing, String home,
-        String dataDir) {
+        String dataDir, Transport transport) {
 
     /** 精确 IPv4 字面量。 */
     static final Pattern IPV4 = Pattern.compile("^(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(\\.(25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}$");
@@ -41,7 +41,13 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
     /** M1 兼容构造器（无 dataDir）。 */
     public MmabProperties(Platform platform, Console console, List<Instance> instances, Web web, Timeouts timeouts,
             List<AdapterPackage> adapters, Operator operator, Testing testing, String home) {
-        this(platform, console, instances, web, timeouts, adapters, operator, testing, home, null);
+        this(platform, console, instances, web, timeouts, adapters, operator, testing, home, null, null);
+    }
+
+    /** M3 兼容构造器（无 transport）。 */
+    public MmabProperties(Platform platform, Console console, List<Instance> instances, Web web, Timeouts timeouts,
+            List<AdapterPackage> adapters, Operator operator, Testing testing, String home, String dataDir) {
+        this(platform, console, instances, web, timeouts, adapters, operator, testing, home, dataDir, null);
     }
 
     @ConstructorBinding
@@ -54,6 +60,7 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
         adapters = adapters != null ? List.copyOf(adapters) : List.of();
         operator = operator != null ? operator : new Operator(null);
         testing = testing != null ? testing : new Testing(false, false);
+        transport = transport != null ? transport : new Transport(0, 0);
         home = home == null || home.isBlank() ? "." : home;
         dataDir = dataDir == null || dataDir.isBlank()
                 ? System.getProperty("user.home") + "/Library/Application Support/MacminiAppBridge" : dataDir;
@@ -309,6 +316,24 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
     public record Operator(String passwordHash) {
         public Operator {
             passwordHash = passwordHash == null || passwordHash.isBlank() ? null : passwordHash;
+        }
+    }
+
+    /**
+     * 浏览器数据面（设计 §9.3）。出站缓冲超过任一上限即判定慢客户端并断开该连接（其他连接不受影响）。
+     * 默认 16384 帧 / 32 MiB：真实应用在启动 / 开始任务时会瞬时推送大量状态（M3 实机：千问开始任务 2 秒内
+     * 超出 M1 起始值 2048 帧 / 4 MiB 被断开，浏览器显示 1006）。单帧上限仍由线路上限决定。
+     *
+     * @param outboundMaxFrames 出站排队帧数上限（0 = 默认 16384）
+     * @param outboundMaxBytes  出站排队字节上限（0 = 默认 32 MiB）
+     */
+    public record Transport(int outboundMaxFrames, long outboundMaxBytes) {
+        public Transport {
+            outboundMaxFrames = outboundMaxFrames <= 0 ? 16384 : outboundMaxFrames;
+            outboundMaxBytes = outboundMaxBytes <= 0 ? 32L * 1024 * 1024 : outboundMaxBytes;
+            if (outboundMaxBytes > 512L * 1024 * 1024) {
+                throw new IllegalArgumentException("mmab.transport.outbound-max-bytes must be <= 512 MiB");
+            }
         }
     }
 

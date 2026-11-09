@@ -41,6 +41,13 @@
 ### 实机发现（已修复并补测试）
 
 1. **跨端口开窗被拒（403）**：控制台响应 `Referrer-Policy: same-origin`，按 Fetch 规范跨源请求的 Origin 会被序列化为 `null`，exchange 只认控制台 Origin。M1 测试用 JDK 客户端手填 Origin，未覆盖。修复：控制台端口改 `strict-origin`（只发源、不带路径），实例端口仍 `same-origin`；`MacminiAppBridgeApplicationTest`、`OfflineEndToEndTest` 断言更新。
+3. **开始任务 2 秒后断线（浏览器显示 1006）**（操作者实际使用中发现）：08:29:33 千问日志记录任务开始，08:29:35 平台以
+   `QUEUE_LIMIT` 断开该浏览器连接。1006 对应“出站缓冲超预算 → 直接中止、不发关闭帧”的慢客户端路径；M1 的起始预算
+   2048 帧 / 4 MiB 对开始任务时的推送突发过小。当时没有记录是帧数还是字节超限（已补）。修复：出站预算改为可配置
+   `mmab.transport.outbound-max-frames / outbound-max-bytes`，默认 16384 帧 / 32 MiB（M1 慢客户端测试显式保留 4 MiB）；
+   溢出时审计记录原因、单帧字节、排队帧数与字节（不含内容）；适配器 SDK 遇到超过线路上限的单帧时只关闭对应连接或回
+   `QUEUE_LIMIT` 错误，不再可能拖垮整条适配器链路；1006 提示改为“刷新本页即可重新连接”并给出按钮（会话与租约仍在）。
+   **未复现验证**：开始任务会在账号中留下记录，需操作者再次实际使用确认。
 2. **白屏（vendor 包 404）**：千问 2.0.0 的 vendor 包约 37 MiB，超过 32 MiB 单文件上限。修复：上限 96 MiB；非 HTML 资源加弱 ETag + Last-Modified（`no-cache` 下可 304）；`ContentControllerTest` 新增 40 MiB 用例。
 
 ## Codex（S2）

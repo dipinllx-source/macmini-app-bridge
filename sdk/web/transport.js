@@ -35,6 +35,14 @@
         (document.body || document.documentElement).appendChild(el);
       }
       el.textContent = text;
+      if (text && /刷新本页/.test(text)) {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.textContent = '刷新重连';
+        b.style.cssText = 'margin-left:10px;padding:2px 10px;border:0;border-radius:4px;background:#fff;color:#b42318;cursor:pointer';
+        b.addEventListener('click', () => location.reload());
+        el.appendChild(b);
+      }
       el.style.display = text ? 'block' : 'none';
     };
     if (document.body || document.readyState !== 'loading') show();
@@ -44,6 +52,10 @@
   function closeMessage(code, reason) {
     if (code === 1013) return 'macmini App 引桥：该实例已在另一个标签页打开（或本页过慢被断开）。请关闭另一个标签页后回到控制台重新打开。';
     if (code === 1009) return 'macmini App 引桥：单帧超过 1 MiB，连接已关闭。';
+    // 1006（无关闭帧）/ QUEUE_LIMIT：多为网络中断或推送积压被平台断开；会话与租约仍在，刷新本页即可重连
+    if (code === 1006 || reason === 'QUEUE_LIMIT') {
+      return `macmini App 引桥连接意外中断（${reason || code}）。刷新本页即可重新连接；若刷新后仍失败，请回到控制台重新打开。`;
+    }
     return `macmini App 引桥连接已断开（${reason || code}）。请回到控制台重新打开。`;
   }
 

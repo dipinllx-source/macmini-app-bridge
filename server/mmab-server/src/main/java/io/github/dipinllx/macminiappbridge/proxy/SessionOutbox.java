@@ -22,6 +22,7 @@ public final class SessionOutbox {
     private long requested;
     private final AtomicInteger wip = new AtomicInteger();
     private boolean overflowed;
+    private String overflowDetail = "";
 
     public SessionOutbox(BoundedFrameQueue.Budget budget, Runnable onOverflow) {
         this.queue = new BoundedFrameQueue<>(budget);
@@ -35,6 +36,12 @@ public final class SessionOutbox {
             synchronized (this) {
                 first = !overflowed;
                 overflowed = true;
+                if (first) {
+                    // 只记大小与计数，不记内容：用于定位是单帧过大还是积压过多（慢客户端 / 突发）
+                    overflowDetail = "cause=" + r.name() + " lane=" + lane.name()
+                            + " frameBytes=" + frame.getBytes(StandardCharsets.UTF_8).length
+                            + " queuedFrames=" + queue.size() + " queuedBytes=" + queue.queuedBytes();
+                }
             }
             if (first) {
                 onOverflow.run();
@@ -73,6 +80,11 @@ public final class SessionOutbox {
 
     public long queuedBytes() {
         return queue.queuedBytes();
+    }
+
+    /** 首次溢出的原因（元数据）；未溢出时为空串。 */
+    public synchronized String overflowDetail() {
+        return overflowDetail;
     }
 
     public boolean overflowed() {

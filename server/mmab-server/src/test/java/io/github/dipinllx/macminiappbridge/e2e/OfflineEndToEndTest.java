@@ -87,6 +87,9 @@ class OfflineEndToEndTest {
                 "--mmab.testing.allow-test-adapters=true",
                 "--mmab.testing.clock-control=true",
                 "--mmab.timeouts.request-deadline=3s",
+                // M1 慢客户端测试按设计起始值 2048 帧 / 4 MiB 验证（生产默认 16384 帧 / 32 MiB，见 MmabProperties.Transport）
+                "--mmab.transport.outbound-max-frames=2048",
+                "--mmab.transport.outbound-max-bytes=4194304",
                 "--mmab.adapters[0].app-id=mock",
                 "--mmab.adapters[0].descriptor=adapters/mock/adapter.yaml",
                 "--mmab.adapters[0].command[0]=" + TestSupport.node(),
@@ -531,6 +534,8 @@ class OfflineEndToEndTest {
             assertThat(e.action()).isEqualTo("transport.close");
             assertThat(e.instance()).isEqualTo("mock-01");
             assertThat(e.result()).isEqualTo("QUEUE_LIMIT");
+            // 诊断：只有大小与计数，没有内容
+            assertThat(e.detail()).contains("cause=OVERFLOW").contains("queuedBytes=").doesNotContain("xxxx");
         });
         // 慢客户端被断开后：适配器与实例仍可用，同一会话重新连接即可
         Ws again = ws("mock-01", slowCookie, origin("mock-01"), true);

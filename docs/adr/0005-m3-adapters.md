@@ -34,5 +34,7 @@
 
 - 控制台端口的 Referrer-Policy 改为 `strict-origin`：`same-origin` 会让浏览器在跨端口开窗表单里发送 `Origin: null`，
   与“exchange 只认控制台 Origin”的规则冲突。实例端口保持 `same-origin`。这推翻了设计稿中“统一 same-origin”的写法。
+- 出站缓冲预算可配置（`mmab.transport.*`），默认 16384 帧 / 32 MiB：设计 §9.3 的 2048 帧 / 4 MiB 起始值对真实应用
+  开始任务时的推送突发过小（实机 1006 断线）；溢出原因写入审计。适配器 SDK 对超线路上限的单帧做隔离处理。
 - 原版资源单文件上限 96 MiB（32 MiB 时千问 vendor 包 404 白屏），非 HTML 资源带弱 ETag / Last-Modified。
 - Codex 适配器（S2：renderer CDP、app-host MessagePort、启动白名单、宿主请求过滤、≥700 帧突发）尚未实现。

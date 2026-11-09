@@ -90,6 +90,13 @@ public final class BridgeConnection {
 
     BridgeConnection(String connectionId, InstanceSession session, InstanceRuntime runtime, WebSocketSession ws,
             InstanceAccess access, LeaseManager leases, AuditLog audit, MmabClock clock, Duration requestDeadline) {
+        this(connectionId, session, runtime, ws, access, leases, audit, clock, requestDeadline,
+                BoundedFrameQueue.Budget.outbound());
+    }
+
+    BridgeConnection(String connectionId, InstanceSession session, InstanceRuntime runtime, WebSocketSession ws,
+            InstanceAccess access, LeaseManager leases, AuditLog audit, MmabClock clock, Duration requestDeadline,
+            BoundedFrameQueue.Budget outboundBudget) {
         this.connectionId = connectionId;
         this.session = session;
         this.runtime = runtime;
@@ -99,7 +106,7 @@ public final class BridgeConnection {
         this.audit = audit;
         this.clock = clock;
         this.requestDeadline = requestDeadline;
-        this.outbox = new SessionOutbox(BoundedFrameQueue.Budget.outbound(), this::onSlowConsumer);
+        this.outbox = new SessionOutbox(outboundBudget, this::onSlowConsumer);
         this.ports = new PortTable(clock);
     }
 
@@ -516,8 +523,11 @@ public final class BridgeConnection {
         closeReason = reason;
         pending.clear();
         releasePorts();
-        audit.record(session.id(), "transport.close", instanceId(), reason == null ? "OK" : reason.name(),
-                "connection=" + connectionId);
+        String detail = "connection=" + connectionId;
+        if (abort && outbox.overflowed()) {
+            detail += " " + outbox.overflowDetail();
+        }
+        audit.record(session.id(), "transport.close", instanceId(), reason == null ? "OK" : reason.name(), detail);
         outbox.complete();
         ws.close(status).onErrorResume(t -> Mono.empty()).subscribe();
         if (abort) {
