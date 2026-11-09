@@ -239,19 +239,22 @@ test('network drop: in-flight requests fail as unknown, the page reconnects with
   assert.equal(sockets.length, 2);
   assert.match(sockets[1].url, /\/__mmab\/bridge\/ws\?resume=c-abcd1234$/);
   sockets[1].open();
-  assert.equal(sockets[1].sent.length, 1, 'only the request issued after the drop, no replay');
-  assert.equal(sockets[1].sent[0].payload, encode(2));
+  assert.equal(sockets[1].sent.length, 0, 'held until the server says whether the old state survived');
   sockets[1].message({ kind: 'HELLO', connectionId: 'c-abcd1234', resumed: true });
   assert.equal(lost, 0, 'lossless resume: the app keeps its state');
+  assert.equal(sockets[1].sent.length, 1, 'only the request issued after the drop, no replay');
+  assert.equal(sockets[1].sent[0].payload, encode(2));
   sockets[1].message({ kind: 'RESPONSE', cid: sockets[1].sent[0].cid, payload: encode('ok') });
   assert.equal(await queued, 'ok');
 
   // later the server could not resume (grace over / platform restart): the app is told to start over
   sockets[1].shut(1006, '');
   await tick();
+  t.request('qwenwork.invoke', 3); // queued for the old state
   sockets[2].open();
   sockets[2].message({ kind: 'HELLO', connectionId: 'c-new99999', resumed: false });
   assert.equal(lost, 1);
+  assert.equal(sockets[2].sent.length, 0, 'stale queued frames dropped when the state could not be resumed');
 });
 
 test('reconnect stops with a clear notice when the session is gone or the instance is taken', async () => {

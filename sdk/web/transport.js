@@ -175,6 +175,12 @@
       }
     }
 
+    function flush(sock) {
+      const q = queue;
+      queue = [];
+      for (const f of q) if (sock.readyState === WebSocket.OPEN) sock.send(f);
+    }
+
     function giveUp(code, reason) {
       if (closed) return;
       closed = reason || `CLOSED_${code}`;
@@ -199,9 +205,13 @@
           const previous = connectionId;
           connectionId = typeof f.connectionId === 'string' ? f.connectionId : null;
           if (previous && !f.resumed) {
-            // the server no longer has this page's ports / subscriptions: the app must start over
+            // the server no longer has this page's ports / subscriptions: frames queued for the old state are
+            // meaningless, drop them and let the app start over (controlled re-initialisation)
+            queue = [];
             if (o.onLost) o.onLost();
+            return;
           }
+          if (previous) flush(ws);
           return;
         }
         case 'RESPONSE': {
@@ -268,9 +278,8 @@
         stats.reconnects = (stats.reconnects || 0) + (stats.opens ? 1 : 0);
         stats.opens = (stats.opens || 0) + 1;
         banner('', '__mmab_reconnect');
-        const q = queue;
-        queue = [];
-        for (const f of q) sock.send(f);
+        // first connection: nothing to lose, flush now; after a reconnect wait for HELLO (resumed or not)
+        if (!connectionId) flush(sock);
         clearInterval(timer);
         timer = setInterval(() => {
           if (sock.readyState === WebSocket.OPEN) sock.send('{"kind":"HEARTBEAT"}');
