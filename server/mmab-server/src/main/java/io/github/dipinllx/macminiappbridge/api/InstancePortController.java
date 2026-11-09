@@ -167,6 +167,35 @@ public class InstancePortController {
      * 会话 Cookie、精确 Origin、Fetch Metadata 与 Content-Type；这里再做网关闸门、codec 校验（不允许携带端口）、
      * 租约 / generation 复核与 deadline。HTTP 200 + {@code {"payload"}} 或 {@code {"error"}}（与 WS RESPONSE 同形）。
      */
+    /** reliable-personal-entry D1：浏览器断线诊断，只写审计（白名单元数据），204。 */
+    @PostMapping("/__mmab/bridge/diag")
+    public Mono<ResponseEntity<Void>> diag(ServerWebExchange ex) {
+        InstanceSession s = Requests.instanceSession(ex);
+        return DataBufferUtils.join(ex.getRequest().getBody(), io.github.dipinllx.macminiappbridge.proxy.BrowserDiagnostics.MAX_BODY_BYTES)
+                .map(buf -> {
+                    try {
+                        return buf.toString(java.nio.charset.StandardCharsets.UTF_8);
+                    } finally {
+                        DataBufferUtils.release(buf);
+                    }
+                })
+                .onErrorMap(DataBufferLimitException.class,
+                        e -> new ApiException(HttpStatus.PAYLOAD_TOO_LARGE, ErrorCode.QUEUE_LIMIT))
+                .defaultIfEmpty("")
+                .map(body -> {
+                    JsonNode n;
+                    try {
+                        n = StrictJson.WIRE.parse(body);
+                    } catch (ProtocolException e) {
+                        throw new ApiException(HttpStatus.BAD_REQUEST, ErrorCode.MALFORMED_FRAME);
+                    }
+                    var parsed = io.github.dipinllx.macminiappbridge.proxy.BrowserDiagnostics.parse(n)
+                            .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, ErrorCode.MALFORMED_FRAME));
+                    audit.record(s.id(), "browser.diag", s.instanceId(), parsed.getKey(), parsed.getValue());
+                    return ResponseEntity.noContent().<Void>build();
+                });
+    }
+
     @PostMapping("/__mmab/bridge/call")
     public Mono<ResponseEntity<Map<String, Object>>> call(ServerWebExchange ex) {
         InstanceSession s = Requests.instanceSession(ex);

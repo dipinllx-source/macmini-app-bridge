@@ -16,6 +16,8 @@
   var relay;
   var themeListeners = new Set();
   var t = T.create({
+    // disconnect diagnostics remember recent host message types (never content)
+    label: function (op, value) { return op === 'codex.hostMessage' && value && typeof value.type === 'string' ? 'host:' + value.type : op; },
     onEvent: function (op, value, payloadText) {
       if (op === 'codex.hostMessage') {
         stats.hostMessages++;
@@ -66,6 +68,7 @@
   bridge.acknowledgeChunkedMessage = function () {};
   bridge.sendMessageFromView = function (message) {
     var type = message && message.type;
+    if (typeof type === 'string' && t.note) t.note('view:' + type);
     if (type === 'ready') return t.request('codex.viewReady', null).then(function () {}, swallow('ready'));
     if (VIEW_READS.indexOf(type) >= 0) return t.request('codex.viewRead', { type: type }).then(function () {}, swallow(type));
     stats.droppedViewMessages++;

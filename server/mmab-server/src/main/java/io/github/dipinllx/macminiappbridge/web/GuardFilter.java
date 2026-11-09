@@ -56,6 +56,8 @@ public class GuardFilter implements WebFilter {
     static final String APP_SHIM_PREFIX = "/__mmab/app-shim/";
     /** M3：同步调用端点（启动引导 / sendSync 类），只接受 adapter.yaml 中声明 sync 的操作。 */
     static final String SYNC_CALL = "/__mmab/bridge/call";
+    /** reliable-personal-entry D1：浏览器断线诊断（sendBeacon），只收白名单元数据。 */
+    static final String DIAG = "/__mmab/bridge/diag";
     static final String HEALTH = API_PREFIX + "health";
     static final String LOGIN = API_PREFIX + "auth/login";
 
@@ -199,7 +201,8 @@ public class GuardFilter implements WebFilter {
         }
         boolean platformPath = path.startsWith("/__mmab/");
         if (platformPath && !path.equals(INSTANCE_LOGOUT) && !path.equals(BOOTSTRAP) && !path.equals(WS)
-                && !path.equals(SYNC_CALL) && !path.startsWith(SHIM_PREFIX) && !path.startsWith(APP_SHIM_PREFIX)) {
+                && !path.equals(SYNC_CALL) && !path.equals(DIAG) && !path.startsWith(SHIM_PREFIX)
+                && !path.startsWith(APP_SHIM_PREFIX)) {
             return deny(exchange, HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
         }
 
@@ -244,8 +247,26 @@ public class GuardFilter implements WebFilter {
             }
             return chain.filter(exchange);
         }
+        if (path.equals(DIAG)) {
+            out.set(HttpHeaders.CACHE_CONTROL, "no-store");
+            if (!HttpMethod.POST.equals(method)) {
+                return deny(exchange, HttpStatus.METHOD_NOT_ALLOWED, ErrorCode.METHOD_NOT_ALLOWED);
+            }
+            // sendBeacon 由页面自身发出：精确本端口 Origin，Fetch Metadata 只允许同源
+            if (!listeners.isOriginFor(origin, role.port())) {
+                return deny(exchange, HttpStatus.FORBIDDEN, ErrorCode.ORIGIN_REJECTED);
+            }
+            if (fetchSite != null && !"same-origin".equals(fetchSite)) {
+                return deny(exchange, HttpStatus.FORBIDDEN, ErrorCode.FETCH_SITE_REJECTED);
+            }
+            MediaType type = req.getHeaders().getContentType();
+            if (type == null || !(MediaType.TEXT_PLAIN.isCompatibleWith(type) || MediaType.APPLICATION_JSON.isCompatibleWith(type))) {
+                return deny(exchange, HttpStatus.UNSUPPORTED_MEDIA_TYPE, ErrorCode.MALFORMED_FRAME);
+            }
+            return chain.filter(exchange);
+        }
         if (isUnsafe(method)) {
-            // 实例端口除 exchange / logout / 同步调用外不接受写方法（原版资源代理只读）
+            // 实例端口除 exchange / logout / 同步调用 / 诊断外不接受写方法（原版资源代理只读）
             return deny(exchange, HttpStatus.METHOD_NOT_ALLOWED, ErrorCode.METHOD_NOT_ALLOWED);
         }
         if (path.equals(BOOTSTRAP)) {

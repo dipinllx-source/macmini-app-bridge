@@ -124,7 +124,7 @@ test('insecure-context fill-ins: randomUUID, digest, clipboard, mediaDevices wit
 });
 
 /** Loads codec.js + transport.js into a sandbox with fake WebSocket / XHR / document. */
-function transportSandbox({ xhrResponse = { status: 200, body: '{"payload":"1"}' } } = {}) {
+function transportSandbox({ xhrResponse = { status: 200, body: '{"payload":"1"}' }, extra = {} } = {}) {
   const sockets = [];
   const xhrs = [];
   const nodes = new Map();
@@ -161,6 +161,7 @@ function transportSandbox({ xhrResponse = { status: 200, body: '{"payload":"1"}'
   const ctx = vm.createContext({
     WebSocket: FakeWS, XMLHttpRequest: FakeXHR, document, location: { protocol: 'https:', host: '10.0.0.5:8445' },
     setInterval: () => 1, clearInterval() {}, console, Event, EventTarget, TextEncoder, TextDecoder, btoa, atob,
+    ...extra,
   });
   ctx.globalThis = ctx;
   vm.runInContext(src('./codec.js'), ctx);
@@ -237,4 +238,49 @@ test('codec.js defines MmabCodec once and codec.mjs re-exports the same classes'
   const before = globalThis.MmabCodec;
   vm.runInThisContext(src('./codec.js'));
   assert.equal(globalThis.MmabCodec, before, 'second load is a no-op');
+});
+
+test('disconnect diagnostics: close / unload / next-load beacons carry metadata and names only', async () => {
+  const beacons = [];
+  const store = new Map();
+  const winListeners = {};
+  const extra = {
+    navigator: { sendBeacon: (url, blob) => { beacons.push([url, blob]); return true; } },
+    Blob, Date, JSON,
+    sessionStorage: { getItem: (k) => store.get(k) ?? null, setItem: (k, v) => store.set(k, v), removeItem: (k) => store.delete(k) },
+    addEventListener: (t, fn) => { winListeners[t] = fn; },
+    performance: { getEntriesByType: () => [{ type: 'navigate' }] },
+  };
+  const { ctx, sockets } = transportSandbox({ extra });
+  const t = ctx.MmabTransport.create({ label: (op, v) => (v && v.channel) || op, onEvent() {} });
+  sockets[0].open();
+  sockets[0].message({ kind: 'EVENT', op: 'qwenwork.ipc', payload: encode({ channel: 'app:state', args: ['SECRET-CONTENT'] }) });
+  t.note('view:ready');
+  t.note('bad name with spaces');
+  t.note('x'.repeat(65));
+  sockets[0].shut(1006, '');
+  const read = async (i) => JSON.parse(await beacons[i][1].text());
+  assert.equal(beacons[0][0], '/__mmab/bridge/diag');
+  const close = await read(0);
+  assert.equal(close.e, 'close');
+  assert.equal(close.code, 1006);
+  assert.equal(close.clean, false);
+  assert.equal(close.unl, false);
+  assert.deepEqual(close.recent, ['app:state', 'view:ready'], 'names only, invalid names dropped');
+  assert.ok(Number.isInteger(close.up) && Number.isInteger(close.ws));
+  assert.doesNotMatch(JSON.stringify(close), /SECRET/);
+
+  winListeners.pagehide();
+  const unload = await read(1);
+  assert.equal(unload.e, 'unload');
+  assert.ok(store.has('__mmab_last_unload'));
+
+  // the next page load in the same tab reports the previous unload
+  const again = transportSandbox({ extra: { ...extra, performance: { getEntriesByType: () => [{ type: 'reload' }] } } });
+  again.ctx.MmabTransport.create();
+  const load = await read(2);
+  assert.equal(load.e, 'load');
+  assert.equal(load.nav, 'reload');
+  assert.equal(load.prev.e, 'unload');
+  assert.equal(store.has('__mmab_last_unload'), false);
 });

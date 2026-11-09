@@ -12,6 +12,35 @@
   const WS_PATH = '/__mmab/bridge/ws';
   const CALL_PATH = '/__mmab/bridge/call';
   const HEARTBEAT_MS = 15000;
+  const DIAG_PATH = '/__mmab/bridge/diag';
+  const DIAG_KEY = '__mmab_last_unload';
+  const NAME = /^[A-Za-z0-9_.:\/-]{1,64}$/;
+  const loadedAt = Date.now();
+
+  /** Navigation type of this page load (navigate / reload / back_forward / prerender), metadata only. */
+  function navType() {
+    try {
+      const e = performance.getEntriesByType('navigation')[0];
+      return e && ['navigate', 'reload', 'back_forward', 'prerender'].includes(e.type) ? e.type : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+  function visibility() {
+    const v = typeof document !== 'undefined' && document.visibilityState;
+    return v === 'visible' || v === 'hidden' || v === 'prerender' ? v : undefined;
+  }
+  /** Disconnect diagnostics (reliable-personal-entry D1): enums, numbers and message / channel NAMES only. */
+  function beacon(o) {
+    try {
+      const body = JSON.stringify(o);
+      if (typeof navigator !== 'undefined' && navigator.sendBeacon) {
+        navigator.sendBeacon(DIAG_PATH, new Blob([body], { type: 'text/plain' }));
+      }
+    } catch {
+      // diagnostics must never break the page
+    }
+  }
 
   class BridgeError extends Error {
     constructor(code) {
@@ -69,6 +98,43 @@
   function create(o = {}) {
     const pending = new Map();
     const stats = { connected: false, requests: 0, events: 0, portFrames: 0, errors: 0, closeCode: null };
+    const recent = [];
+    let openedAt = null;
+    let unloading = false;
+    /** Remember the last few app message / IPC channel names (never content) for disconnect diagnostics. */
+    function note(name) {
+      if (typeof name !== 'string' || !NAME.test(name) || recent[recent.length - 1] === name) return;
+      recent.push(name);
+      if (recent.length > 16) recent.shift();
+    }
+    const base = () => {
+      const o = { vis: visibility(), up: Math.max(0, Date.now() - loadedAt), recent: recent.slice() };
+      if (openedAt !== null) o.ws = Math.max(0, Date.now() - openedAt);
+      return o;
+    };
+    try {
+      const prev = typeof sessionStorage !== 'undefined' && sessionStorage.getItem(DIAG_KEY);
+      if (prev) {
+        sessionStorage.removeItem(DIAG_KEY);
+        beacon({ e: 'load', nav: navType(), prev: JSON.parse(prev) });
+      } else if (navType() === 'reload') {
+        beacon({ e: 'load', nav: 'reload' });
+      }
+    } catch {
+      // no storage: skip
+    }
+    if (typeof addEventListener === 'function') {
+      addEventListener('pagehide', () => {
+        unloading = true;
+        const o = { e: 'unload', ...base() };
+        beacon(o);
+        try {
+          sessionStorage.setItem(DIAG_KEY, JSON.stringify(o));
+        } catch {
+          // ignore
+        }
+      });
+    }
     let queue = [];
     let seq = 0;
     let closed = null;
@@ -78,6 +144,7 @@
     const ready = new Promise((resolve, reject) => {
       ws.addEventListener('open', () => {
         stats.connected = true;
+        openedAt = Date.now();
         for (const f of queue) ws.send(f);
         queue = [];
         timer = setInterval(() => {
@@ -130,6 +197,7 @@
             return;
           }
           try {
+            if (o.label) note(o.label(f.op, value));
             o.onEvent(f.op, value, f.payload);
           } catch (e) {
             stats.errors++;
@@ -155,6 +223,9 @@
       closed = ev.reason || `CLOSED_${ev.code}`;
       stats.connected = false;
       stats.closeCode = ev.code;
+      const d = { e: 'close', code: ev.code, clean: !!ev.wasClean, unl: unloading, ...base() };
+      if (/^[A-Z_]{1,40}$/.test(ev.reason || '')) d.reason = ev.reason;
+      beacon(d);
       clearInterval(timer);
       for (const p of pending.values()) p.reject(new BridgeError(closed));
       pending.clear();
@@ -206,6 +277,7 @@
         sendFrame({ kind: 'PORT_CLOSE', port });
       },
       isOpen: () => ws.readyState === WebSocket.OPEN,
+      note,
       close() {
         ws.close(1000, 'client');
       },

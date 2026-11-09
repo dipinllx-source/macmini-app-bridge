@@ -2,7 +2,7 @@
 
 ## 1. 断线诊断（D1，先于自动重连）
 
-- [ ] 1.1 浏览器侧在 WS 关闭 / 页面卸载时经 `sendBeacon` 上报 `{closeCode, wasClean, navigationType, visibilityState}` 与 reload 触发方摘要（仅文件名:行号）到实例端口的固定诊断端点；平台校验字段为枚举 / 数字后写审计；验证：`sdk/web` 单测覆盖字段白名单，Java 测试覆盖端点只收白名单字段且需实例会话
+- [x] 1.1 浏览器侧在 WS 关闭 / 页面卸载时经 `sendBeacon` 上报 `{closeCode, wasClean, navigationType, visibilityState}` 与 reload 触发方摘要（仅文件名:行号）到实例端口的固定诊断端点；平台校验字段为枚举 / 数字后写审计；验证：`sdk/web` 单测覆盖字段白名单，Java 测试覆盖端点只收白名单字段且需实例会话
 - [ ] 1.2 在本机让 codex-01 与 qwen-01 各空闲打开 ≥ 30 分钟，收集诊断审计，定位约 5 分钟一次断开的触发方并写入 `docs/m4-reliability-findings.md`；验证：文档给出触发方证据与复现条件
 - [ ] 1.3 按 1.2 的结论在 shim / 适配器中消除周期断开（或确认不可消除并记录）；验证：codex-01 空闲 2 小时审计中无 `transport.close`
 

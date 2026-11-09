@@ -33,6 +33,8 @@
   }
 
   var t = transport.create({
+    // disconnect diagnostics remember recent IPC channel names (never arguments)
+    label: function (op, value) { return value && typeof value.channel === 'string' ? value.channel : op; },
     onEvent: function (op, value) {
       if (op !== 'qwenwork.ipc' || !value || typeof value.channel !== 'string' || !Array.isArray(value.args)) return;
       dispatch(value.channel, value.args);

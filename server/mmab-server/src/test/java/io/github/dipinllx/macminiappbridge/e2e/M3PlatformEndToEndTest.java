@@ -49,6 +49,7 @@ class M3PlatformEndToEndTest {
     static LeaseManager leases;
     static InstanceRegistry instances;
     static TransportRegistry transports;
+    static io.github.dipinllx.macminiappbridge.audit.AuditLog audit;
 
     record Console(String cookie, String csrf, String origin) {
     }
@@ -90,6 +91,7 @@ class M3PlatformEndToEndTest {
         leases = ctx.getBean(LeaseManager.class);
         instances = ctx.getBean(InstanceRegistry.class);
         transports = ctx.getBean(TransportRegistry.class);
+        audit = ctx.getBean(io.github.dipinllx.macminiappbridge.audit.AuditLog.class);
         http = HttpClient.newBuilder().sslContext(tls.clientContext).version(HttpClient.Version.HTTP_1_1)
                 .followRedirects(HttpClient.Redirect.NEVER).connectTimeout(Duration.ofSeconds(5)).build();
         assertThat(instances.require("mock-01").ready()).isTrue();
@@ -194,6 +196,61 @@ class M3PlatformEndToEndTest {
         leases.revokeInstance("mock-01", ErrorCode.LEASE_REQUIRED);
         assertThat(syncCall(cookie, origin, "same-origin", "application/json", frame("mock.syncEcho", "1"))
                 .statusCode()).isEqualTo(401);
+    }
+
+    // =================================================================== browser diagnostics (reliable-personal-entry D1)
+
+    @Test
+    void browserDiagnosticsAcceptOnlyWhitelistedMetadataFromTheInstancePage() throws Exception {
+        Console c = login("127.0.0.1");
+        String cookie = openSession(c, "127.0.0.1");
+        String origin = instanceOrigin("127.0.0.1");
+        String body = "{\"e\":\"close\",\"code\":1006,\"clean\":false,\"unl\":false,\"vis\":\"visible\","
+                + "\"up\":300123,\"ws\":299000,\"recent\":[\"host:thread-updated\",\"view:ready\"]}";
+        assertThat(diag(cookie, origin, "same-origin", "text/plain;charset=UTF-8", body).statusCode()).isEqualTo(204);
+        assertThat(audit.recent(50)).anySatisfy(e -> {
+            assertThat(e.action()).isEqualTo("browser.diag");
+            assertThat(e.result()).isEqualTo("close");
+            assertThat(e.detail()).contains("code=1006").contains("up=300123")
+                    .contains("recent=host:thread-updated,view:ready");
+        });
+        String prev = "{\"e\":\"load\",\"nav\":\"reload\",\"prev\":{\"e\":\"unload\",\"up\":5}}";
+        assertThat(diag(cookie, origin, "same-origin", "text/plain", prev).statusCode()).isEqualTo(204);
+
+        // anything outside the whitelist is refused: free text, unknown keys, bad enums, content-looking names
+        for (String bad : new String[] {
+                "{\"e\":\"close\",\"msg\":\"hello\"}",
+                "{\"e\":\"close\",\"recent\":[\"has space\"]}",
+                "{\"e\":\"crash\"}",
+                "{\"e\":\"close\",\"code\":70000}",
+                "{\"e\":\"close\",\"reason\":\"lower case\"}",
+                "{\"e\":\"load\",\"prev\":{\"e\":\"unload\",\"nav\":\"reload\"}}",
+                "not json"}) {
+            assertThat(diag(cookie, origin, "same-origin", "text/plain", bad).statusCode()).as(bad).isEqualTo(400);
+        }
+        assertThat(audit.recent(200)).noneSatisfy(e -> assertThat(e.detail()).contains("hello"));
+        assertThat(diag(cookie, null, "same-origin", "text/plain", body).statusCode()).as("missing Origin").isEqualTo(403);
+        assertThat(diag(cookie, "https://127.0.0.1:" + listeners.consolePort(), "same-site", "text/plain", body)
+                .statusCode()).as("other port").isEqualTo(403);
+        assertThat(diag(null, origin, "same-origin", "text/plain", body).statusCode()).isEqualTo(401);
+        assertThat(diag(cookie, origin, "same-origin", "application/x-www-form-urlencoded", body).statusCode())
+                .isEqualTo(415);
+        assertThat(diag(cookie, origin, "same-origin", "text/plain", "{\"e\":\"close\",\"recent\":[\""
+                + "a".repeat(5000) + "\"]}").statusCode()).isEqualTo(413);
+    }
+
+    static HttpResponse<String> diag(String cookie, String origin, String fetchSite, String type, String body)
+            throws Exception {
+        HttpRequest.Builder b = HttpRequest.newBuilder(URI.create(instanceOrigin("127.0.0.1") + "/__mmab/bridge/diag"))
+                .header("Content-Type", type).header("Sec-Fetch-Site", fetchSite)
+                .POST(HttpRequest.BodyPublishers.ofString(body));
+        if (cookie != null) {
+            b.header("Cookie", "__Host-mmab-i-mock-01=" + cookie);
+        }
+        if (origin != null) {
+            b.header("Origin", origin);
+        }
+        return http.send(b.build(), HttpResponse.BodyHandlers.ofString());
     }
 
     // =================================================================== MessagePort relay (design §9.4)
