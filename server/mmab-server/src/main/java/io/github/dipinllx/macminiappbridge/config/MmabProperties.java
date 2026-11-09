@@ -275,15 +275,19 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
     }
 
     /**
-     * 时限默认值取自设计 §5.3（票据 30 秒）、§6.1（会话 8 小时 / 闲置 30 分钟）、§9.1（租约 60 秒）。
+     * 时限默认值取自设计 §5.3（票据 30 秒）、§9.1（租约 60 秒）；会话按 reliable-personal-entry 为最长 7 天、闲置期限默认同最长期限。
      */
     public record Timeouts(Duration ticketTtl, Duration leaseTtl, Duration sessionMaxAge, Duration sessionIdle,
             Duration requestDeadline, Duration sweepInterval, Duration adapterStartup) {
         public Timeouts {
             ticketTtl = orDefault(ticketTtl, Duration.ofSeconds(30));
             leaseTtl = orDefault(leaseTtl, Duration.ofSeconds(60));
-            sessionMaxAge = orDefault(sessionMaxAge, Duration.ofHours(8));
-            sessionIdle = orDefault(sessionIdle, Duration.ofMinutes(30));
+            // reliable-personal-entry D3：默认 7 天；闲置期限默认等于最长期限（期限内用过就不过期），且不超过最长期限
+            sessionMaxAge = orDefault(sessionMaxAge, Duration.ofDays(7));
+            sessionIdle = orDefault(sessionIdle, sessionMaxAge);
+            if (sessionIdle.compareTo(sessionMaxAge) > 0) {
+                sessionIdle = sessionMaxAge;
+            }
             requestDeadline = orDefault(requestDeadline, Duration.ofSeconds(30));
             sweepInterval = orDefault(sweepInterval, Duration.ofSeconds(1));
             adapterStartup = orDefault(adapterStartup, Duration.ofSeconds(15));

@@ -8,13 +8,13 @@
 
 ## 2. 会话期限与持久化（identity/operator-session）
 
-- [ ] 2.1 引入 SQLite（`mmab.data-dir/mmab.db`，WAL）、Spring JDBC 与版本化迁移，建 `console_session`、`instance_session` 表；验证：迁移单测在临时目录建库、重复启动幂等
-- [ ] 2.2 `session-max-age` 默认 7d、`session-idle` 默认等于 max-age 且可配置；会话以 token 散列落库，平台重启后仍有效；验证：`SessionServiceTest` 覆盖默认 / 自定义期限、重启后恢复、库中无明文令牌
-- [ ] 2.3 实例活动（请求 / 心跳 / 资源）续期父控制台会话，落库续期节流 5 分钟；验证：测试中只用实例连接 31 分钟后两类会话仍有效，写库次数符合节流
-- [ ] 2.4 会话 Cookie 加 `Max-Age=剩余期限`，其余属性不变；验证：E2E 断言 Set-Cookie 属性
-- [ ] 2.5 平台启动作废全部租约与票据；已持久化的实例会话重连时重新签发租约与 fencing token；验证：E2E 重启平台后旧租约被拒、同会话重连成功
-- [ ] 2.6 `POST /__mmab/api/v1/sessions/revoke-all`（CSRF + 口令复核）撤销全部会话并关闭数据连接；验证：E2E 撤销后各页面连接收到会话失效关闭码
-- [ ] 2.7 更新 README / ADR（新增 ADR-0006 会话与持久化决策）与 `application.yml` 注释；验证：文档中的配置键与代码一致（`MmabPropertiesTest`）
+- [x] 2.1 引入 SQLite（`mmab.data-dir/mmab.db`，WAL）、Spring JDBC 与版本化迁移，建 `console_session`、`instance_session` 表；验证：迁移单测在临时目录建库、重复启动幂等
+- [x] 2.2 `session-max-age` 默认 7d、`session-idle` 默认等于 max-age 且可配置；会话以 token 散列落库，平台重启后仍有效；验证：`SessionServiceTest` 覆盖默认 / 自定义期限、重启后恢复、库中无明文令牌
+- [x] 2.3 实例活动（请求 / 心跳 / 资源）续期父控制台会话，落库续期节流 5 分钟；验证：测试中只用实例连接 31 分钟后两类会话仍有效，写库次数符合节流
+- [x] 2.4 会话 Cookie 加 `Max-Age=剩余期限`，其余属性不变；验证：E2E 断言 Set-Cookie 属性
+- [x] 2.5 平台启动作废全部租约与票据；已持久化的实例会话重连时重新签发租约与 fencing token；验证：E2E 重启平台后旧租约被拒、同会话重连成功
+- [x] 2.6 `POST /__mmab/api/v1/auth/revoke-all`（CSRF + 口令复核）撤销全部会话并关闭数据连接；验证：E2E 撤销后各页面连接收到会话失效关闭码
+- [x] 2.7 更新 README / ADR（新增 ADR-0006 会话与持久化决策）与 `application.yml` 注释；验证：文档中的配置键与代码一致（`MmabPropertiesTest`）
 
 ## 3. 自动重连（transport/connection-continuity）
 

@@ -26,6 +26,16 @@
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-webflux</artifactId>
     </dependency>
+    <!-- reliable-personal-entry D4：会话 / 审计 / 实例状态持久化（本机 SQLite，版本由 Spring Boot BOM 管理）。
+         只用 spring-jdbc，不引入 DataSource 自动配置与连接池。 -->
+    <dependency>
+      <groupId>org.springframework</groupId>
+      <artifactId>spring-jdbc</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.xerial</groupId>
+      <artifactId>sqlite-jdbc</artifactId>
+    </dependency>
 
     <dependency>
       <groupId>org.springframework.boot</groupId>

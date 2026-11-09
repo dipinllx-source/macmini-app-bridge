@@ -58,7 +58,7 @@
 - 内网 IP 变化：启动脚本取当前 en0 地址；证书 SAN 不含新 IP 时重签并在控制台提示“证书已更换，需重新信任”。
 
 ### D7. 控制台：只读状态 API + SSE
-- `GET /__mmab/api/v1/instances`（已有）扩展为包含分层健康、原因码、版本信息；新增 `GET /__mmab/api/v1/events`（SSE，同源、会话鉴权）推送状态变化；`POST /__mmab/api/v1/instances/{id}/actions/confirm-restart`（CSRF + 二次输入口令，见设计 §5.4 敏感操作）；`POST /__mmab/api/v1/sessions/revoke-all`。
+- `GET /__mmab/api/v1/instances`（已有）扩展为包含分层健康、原因码、版本信息；新增 `GET /__mmab/api/v1/events`（SSE，同源、会话鉴权）推送状态变化；`POST /__mmab/api/v1/instances/{id}/actions/confirm-restart`（CSRF + 二次输入口令，见设计 §5.4 敏感操作）；`POST /__mmab/api/v1/auth/revoke-all`。
 - Vue 页面替换 mock：总览、实例详情（分层健康 + 最近审计）、生命周期（期望 / 实际 / 动作历史）、版本兼容、安全与审计（分页查询）。
 
 ## Risks / Trade-offs

@@ -121,7 +121,8 @@ public class InstancePortController {
             return ResponseEntity.status(HttpStatus.SEE_OTHER)
                     .location(URI.create("/"))
                     .header(HttpHeaders.SET_COOKIE, Requests.sessionCookie(
-                            MmabAttributes.instanceCookie(role.instanceId()), created.token()).toString())
+                            MmabAttributes.instanceCookie(role.instanceId()), created.token(),
+                            sessions.remaining(parent.get().createdAt())).toString())
                     .build();
         });
     }

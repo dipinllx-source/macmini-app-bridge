@@ -63,6 +63,7 @@ class M3PlatformEndToEndTest {
         String hash = PasswordHasher.hash(password.toCharArray(), PasswordHasher.MIN_ITERATIONS);
         List<String> args = new ArrayList<>(List.of(
                 "--mmab.home=" + TestSupport.repoRoot(),
+                "--mmab.data-dir=" + java.nio.file.Files.createTempDirectory("mmab-e2e-data"),
                 "--mmab.console.port=0",
                 "--mmab.console.bind-addresses[0]=127.0.0.1",
                 "--mmab.console.bind-addresses[1]=::1",
@@ -192,10 +193,12 @@ class M3PlatformEndToEndTest {
         assertThat(get(URI.create(origin + "/__mmab/bridge/call"), null, "__Host-mmab-i-mock-01=" + cookie)
                 .statusCode()).isEqualTo(405);
 
-        // 租约撤销后：会话随之失效
+        // reliable-personal-entry：租约撤销后会话保留并重新绑定新租约（同一父控制台会话）；注销后才失效
+        long fenceBefore = leases.current("mock-01").orElseThrow().fencingToken();
         leases.revokeInstance("mock-01", ErrorCode.LEASE_REQUIRED);
         assertThat(syncCall(cookie, origin, "same-origin", "application/json", frame("mock.syncEcho", "1"))
-                .statusCode()).isEqualTo(401);
+                .statusCode()).isEqualTo(200);
+        assertThat(leases.current("mock-01").orElseThrow().fencingToken()).isGreaterThan(fenceBefore);
     }
 
     // =================================================================== browser diagnostics (reliable-personal-entry D1)

@@ -43,8 +43,10 @@ mmab:
   timeouts:
     ticket-ttl: 30s       # 设计 §5.3
     lease-ttl: 60s        # 设计 §9.1
-    session-max-age: 8h   # 设计 §6.1
-    session-idle: 30m
+    # 会话（reliable-personal-entry）：最长 7 天，可配置；闲置期限留空 = 同最长期限（期限内用过就不过期），
+    # 可配置得更短。会话持久化在 mmab.data-dir/mmab.db（只存令牌散列），平台重启后仍有效。
+    session-max-age: 7d
+    session-idle:
     request-deadline: 30s
   operator:
     # PBKDF2 hash（见 PasswordHasher）；未配置时控制台登录返回 SETUP_REQUIRED。不要把明文口令写进配置。

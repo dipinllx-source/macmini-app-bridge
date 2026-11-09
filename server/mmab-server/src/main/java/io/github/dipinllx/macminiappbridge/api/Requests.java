@@ -42,8 +42,13 @@ final class Requests {
     }
 
     /** {@code __Host-} 前缀要求：Secure、Path=/、无 Domain（设计 §5.2 第 1 条）。 */
-    static ResponseCookie sessionCookie(String name, String value) {
-        return ResponseCookie.from(name, value).path("/").secure(true).httpOnly(true).sameSite("Strict").build();
+    /**
+     * 会话 Cookie：{@code __Host-} 前缀、Secure、HttpOnly、SameSite=Strict、Path=/、无 Domain；
+     * reliable-personal-entry D3：带 Max-Age（会话剩余期限），浏览器重启后仍保留。
+     */
+    static ResponseCookie sessionCookie(String name, String value, java.time.Duration maxAge) {
+        return ResponseCookie.from(name, value).path("/").secure(true).httpOnly(true).sameSite("Strict")
+                .maxAge(maxAge).build();
     }
 
     static ResponseCookie expiredCookie(String name) {

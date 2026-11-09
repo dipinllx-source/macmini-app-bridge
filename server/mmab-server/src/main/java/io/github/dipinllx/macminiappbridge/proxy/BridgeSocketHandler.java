@@ -51,7 +51,7 @@ public class BridgeSocketHandler {
         if (rt == null || !rt.ready() || rt.descriptor() == null) {
             return ws.close(new CloseStatus(1011, ErrorCode.ADAPTER_UNAVAILABLE.name()));
         }
-        ErrorCode invalid = access.check(session);
+        ErrorCode invalid = access.ensureBound(session);
         if (invalid != null) {
             return ws.close(new CloseStatus(BridgeConnection.CLOSE_POLICY, invalid.name()));
         }

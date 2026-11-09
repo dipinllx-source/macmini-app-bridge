@@ -78,6 +78,7 @@ class OfflineEndToEndTest {
         String hash = PasswordHasher.hash(password.toCharArray(), PasswordHasher.MIN_ITERATIONS);
         List<String> args = new ArrayList<>(List.of(
                 "--mmab.home=" + TestSupport.repoRoot(),
+                "--mmab.data-dir=" + java.nio.file.Files.createTempDirectory("mmab-e2e-data"),
                 "--mmab.console.port=0",
                 "--mmab.web.tls-bundle=mmabtest",
                 "--spring.ssl.bundle.jks.mmabtest.keystore.location=file:" + tls.keystore,
@@ -152,6 +153,7 @@ class OfflineEndToEndTest {
         String setCookie = ex.headers().allValues("set-cookie").get(0);
         assertThat(setCookie).startsWith("__Host-mmab-i-mock-01=")
                 .contains("; Path=/").contains("; Secure").contains("; HttpOnly").contains("; SameSite=Strict")
+                .containsPattern("; Max-Age=\\d+") // reliable-personal-entry：持久 Cookie，浏览器重启后仍在
                 .doesNotContainIgnoringCase("domain=");
         String cookie = cookieValue(ex, "__Host-mmab-i-mock-01");
 
@@ -466,19 +468,22 @@ class OfflineEndToEndTest {
         assertThat(after).isEqualTo(before + 1);
         assertThat(ws.closeCode.get(5, TimeUnit.SECONDS)).isEqualTo(1008);
         assertThat(ws.closeReason).isEqualTo("STALE_GENERATION");
-        assertThat(instanceGet("mock-01", "/", cookie, null).statusCode()).isEqualTo(401);
         HttpResponse<String> hb = consolePost(c, "/__mmab/api/v1/leases/" + leaseId + "/heartbeat", "");
         assertThat(hb.statusCode()).isEqualTo(409);
         assertThat(hb.body()).contains("STALE_GENERATION");
         assertThat(exchange("mock-01", pendingTicket, consoleOrigin()).statusCode())
                 .as("ticket issued for the old generation").isEqualTo(403);
 
-        String fresh = openSession(c, "mock-01");
-        JsonNode boot = JSON.readTree(instanceGet("mock-01", "/__mmab/bridge/bootstrap", fresh, "same-origin").body());
+        // reliable-personal-entry：同一实例会话在新 generation 下重新绑定租约（旧连接 / 旧帧仍被 fence 拒绝）
+        JsonNode boot = JSON.readTree(instanceGet("mock-01", "/__mmab/bridge/bootstrap", cookie, "same-origin").body());
         assertThat(boot.get("generation").asLong()).isEqualTo(after);
-        Ws ws2 = ws("mock-01", fresh, origin("mock-01"), true);
+        assertThat(leases.current("mock-01").orElseThrow().leaseId()).isNotEqualTo(leaseId);
+        Ws ws2 = ws("mock-01", cookie, origin("mock-01"), true);
         ws2.request("mock.echo", "2", "2");
         assertThat(ws2.response("2").get("error")).isNull();
+        String fresh = openSession(c, "mock-01");
+        Ws ws3 = ws("mock-01", fresh, origin("mock-01"), true);
+        assertThat(ws3.closeCode.get(5, TimeUnit.SECONDS)).as("second tab still occupied").isEqualTo(1013);
     }
 
     @Test
@@ -495,15 +500,57 @@ class OfflineEndToEndTest {
     }
 
     @Test
-    void leaseExpiryRevokesSessionAndTransport() throws Exception {
+    void leaseExpiryClosesTransportButTheSessionRebindsToAFreshLease() throws Exception {
+        // reliable-personal-entry：租约到期只关闭旧连接；会话仍有效，下次访问以父控制台会话重新获取新租约
         Console c = login();
         String cookie = openSession(c, "mock-02");
         Ws ws = ws("mock-02", cookie, origin("mock-02"), true);
+        String oldLease = leases.current("mock-02").orElseThrow().leaseId();
+        long oldFence = leases.current("mock-02").orElseThrow().fencingToken();
         clock.advance(Duration.ofSeconds(61));
         sweeper.sweepNow();
         assertThat(ws.closeCode.get(5, TimeUnit.SECONDS)).isEqualTo(1008);
         assertThat(ws.closeReason).isEqualTo("LEASE_REQUIRED");
+        assertThat(instanceGet("mock-02", "/", cookie, null).statusCode()).as("session rebinds").isEqualTo(200);
+        var fresh = leases.current("mock-02").orElseThrow();
+        assertThat(fresh.leaseId()).isNotEqualTo(oldLease);
+        assertThat(fresh.fencingToken()).isGreaterThan(oldFence);
+        Ws again = ws("mock-02", cookie, origin("mock-02"), true);
+        again.request("mock.echo", "r", "1");
+        assertThat(again.response("r").get("error")).isNull();
+    }
+
+    @Test
+    void revokeAllNeedsThePasswordAndEndsEverySessionAndConnection() throws Exception {
+        Console a = login();
+        Console b = login();
+        String cookie = openSession(a, "mock-02");
+        Ws ws = ws("mock-02", cookie, origin("mock-02"), true);
+        HttpResponse<String> wrong = consolePost(b, "/__mmab/api/v1/auth/revoke-all",
+                JSON.writeValueAsString(Map.of("password", "not-the-password")));
+        assertThat(wrong.statusCode()).isEqualTo(401);
+        assertThat(instanceGet("mock-02", "/", cookie, null).statusCode()).isEqualTo(200);
+        HttpResponse<String> ok = consolePost(b, "/__mmab/api/v1/auth/revoke-all",
+                JSON.writeValueAsString(Map.of("password", password)));
+        assertThat(ok.statusCode()).isEqualTo(204);
+        assertThat(ws.closeCode.get(5, TimeUnit.SECONDS)).isEqualTo(1008);
         assertThat(instanceGet("mock-02", "/", cookie, null).statusCode()).isEqualTo(401);
+        for (Console x : List.of(a, b)) {
+            assertThat(rawGet(console("/__mmab/api/v1/auth/session"), "__Host-mmab-console=" + x.cookie(), "same-origin")
+                    .statusCode()).isEqualTo(401);
+        }
+        consoles.removeAll(List.of(a, b));
+    }
+
+    @Test
+    void anotherConsoleHoldingTheLeaseBlocksRebinding() throws Exception {
+        Console c = login();
+        String cookie = openSession(c, "mock-02");
+        clock.advance(Duration.ofSeconds(61));
+        sweeper.sweepNow();
+        Console other = login();
+        assertThat(consolePost(other, "/__mmab/api/v1/instances/mock-02/leases", "").statusCode()).isEqualTo(201);
+        assertThat(instanceGet("mock-02", "/", cookie, null).statusCode()).as("occupied: no rebinding").isEqualTo(401);
     }
 
     // =================================================================== 6. backpressure / slow client
@@ -571,7 +618,8 @@ class OfflineEndToEndTest {
                 .build(), HttpResponse.BodyHandlers.ofString());
         assertThat(r.statusCode()).as(r.body()).isEqualTo(200);
         assertThat(r.headers().allValues("set-cookie").get(0)).startsWith("__Host-mmab-console=")
-                .contains("; Secure").contains("; HttpOnly").contains("; SameSite=Strict").contains("; Path=/");
+                .contains("; Secure").contains("; HttpOnly").contains("; SameSite=Strict").contains("; Path=/")
+                .containsPattern("; Max-Age=(6047\\d\\d|604800);"); // 默认 7 天（按剩余期限，秒级取整）
         Console c = new Console(cookieValue(r, "__Host-mmab-console"),
                 JSON.readTree(r.body()).get("csrfToken").stringValue());
         consoles.add(c);

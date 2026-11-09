@@ -50,6 +50,8 @@
               <mmab.test.node>${mmab.node}</mmab.test.node>
               <!-- 端到端测试要伪造 Host 头验证 DNS rebinding 防护 -->
               <jdk.httpclient.allowRestrictedHeaders>host</jdk.httpclient.allowRestrictedHeaders>
+              <!-- 测试绝不写操作者真实的数据目录（会话 / 审计数据库） -->
+              <mmab.data-dir>${project.build.directory}/test-data</mmab.data-dir>
             </systemPropertyVariables>
           </configuration>
         </plugin>

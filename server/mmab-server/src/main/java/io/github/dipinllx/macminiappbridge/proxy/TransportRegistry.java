@@ -21,7 +21,7 @@ public class TransportRegistry {
     private final AtomicLong droppedFrames = new AtomicLong();
 
     public boolean attach(BridgeConnection c) {
-        if (byLease.putIfAbsent(c.session().leaseId(), c) != null) {
+        if (byLease.putIfAbsent(c.leaseId(), c) != null) {
             return false;
         }
         byConnection.put(c.connectionId(), c);
@@ -29,14 +29,14 @@ public class TransportRegistry {
     }
 
     public void detach(BridgeConnection c) {
-        byLease.remove(c.session().leaseId(), c);
+        byLease.remove(c.leaseId(), c);
         byConnection.remove(c.connectionId(), c);
     }
 
     /** 适配器帧 → 对应浏览器连接；连接不存在或实例不符则丢弃并计数。 */
     public void route(String instanceId, Envelope e) {
         BridgeConnection c = byConnection.get(e.connectionId());
-        if (c == null || !c.instanceId().equals(instanceId) || !c.session().leaseId().equals(e.leaseId())) {
+        if (c == null || !c.instanceId().equals(instanceId) || !c.leaseId().equals(e.leaseId())) {
             droppedFrames.incrementAndGet();
             return;
         }
@@ -51,7 +51,7 @@ public class TransportRegistry {
         }
         for (BridgeConnection c : List.copyOf(byConnection.values())) {
             if ((r.instanceId() == null || r.instanceId().equals(c.instanceId()))
-                    && (r.leaseId() == null || r.leaseId().equals(c.session().leaseId()))
+                    && (r.leaseId() == null || r.leaseId().equals(c.leaseId()))
                     && (r.instanceSessionId() == null || r.instanceSessionId().equals(c.session().id()))
                     && (r.consoleSessionId() == null || r.consoleSessionId().equals(c.session().parentSessionId()))) {
                 c.closePolicy(r.reason());

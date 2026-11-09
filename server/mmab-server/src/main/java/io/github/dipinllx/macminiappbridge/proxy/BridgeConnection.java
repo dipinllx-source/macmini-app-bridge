@@ -73,6 +73,9 @@ public final class BridgeConnection {
 
     private final String connectionId;
     private final InstanceSession session;
+    private final String leaseId;
+    private final long fencingToken;
+    private final long generation;
     private final InstanceRuntime runtime;
     private final WebSocketSession ws;
     private final SessionOutbox outbox;
@@ -99,6 +102,10 @@ public final class BridgeConnection {
             BoundedFrameQueue.Budget outboundBudget) {
         this.connectionId = connectionId;
         this.session = session;
+        // 连接固定在建立时的租约绑定上（reliable-personal-entry：会话可重新绑定租约，但已建立的连接不迁移）
+        this.leaseId = session.leaseId();
+        this.fencingToken = session.fencingToken();
+        this.generation = session.generation();
         this.runtime = runtime;
         this.ws = ws;
         this.access = access;
@@ -121,6 +128,11 @@ public final class BridgeConnection {
 
     public InstanceSession session() {
         return session;
+    }
+
+    /** 本连接建立时绑定的租约（不随会话重新绑定而改变）。 */
+    public String leaseId() {
+        return leaseId;
     }
 
     public String instanceId() {
@@ -173,14 +185,15 @@ public final class BridgeConnection {
             sendConnectionError(ErrorCode.MALFORMED_FRAME);
             return Mono.empty();
         }
-        ErrorCode invalid = access.check(session);
+        ErrorCode invalid = access.check(session, leaseId, fencingToken, generation);
         if (invalid != null) {
             closePolicy(invalid);
             return Mono.empty();
         }
         return switch (frame.get("kind").stringValue()) {
             case "HEARTBEAT" -> {
-                leases.touch(session.instanceId(), session.leaseId(), session.fencingToken());
+                leases.touch(session.instanceId(), leaseId, fencingToken);
+                access.touchActive(session);
                 ObjectNode ack = StrictJson.WIRE.object();
                 ack.put("kind", "HEARTBEAT");
                 outbox.offer(StrictJson.WIRE.write(ack), Lane.CONTROL, null);
@@ -242,10 +255,10 @@ public final class BridgeConnection {
         Envelope env = Envelope.builder()
                 .profileId(d.profileId())
                 .instanceId(session.instanceId())
-                .processGeneration(session.generation())
+                .processGeneration(generation)
                 .connectionId(connectionId)
-                .leaseId(session.leaseId())
-                .fencingToken(session.fencingToken())
+                .leaseId(leaseId)
+                .fencingToken(fencingToken)
                 .sequence(sequence.incrementAndGet())
                 .correlationId(connectionId + "/" + cid)
                 .messageKind(MessageKind.REQUEST)
@@ -345,10 +358,10 @@ public final class BridgeConnection {
         Envelope env = Envelope.builder()
                 .profileId(runtime.descriptor().profileId())
                 .instanceId(session.instanceId())
-                .processGeneration(session.generation())
+                .processGeneration(generation)
                 .connectionId(connectionId)
-                .leaseId(session.leaseId())
-                .fencingToken(session.fencingToken())
+                .leaseId(leaseId)
+                .fencingToken(fencingToken)
                 .streamId(port)
                 .sequence(sequence.incrementAndGet())
                 .messageKind(kind)
@@ -546,10 +559,10 @@ public final class BridgeConnection {
             client.sendControl(Envelope.builder()
                     .profileId(runtime.descriptor().profileId())
                     .instanceId(session.instanceId())
-                    .processGeneration(session.generation())
+                    .processGeneration(generation)
                     .connectionId(connectionId)
-                    .leaseId(session.leaseId())
-                    .fencingToken(session.fencingToken())
+                    .leaseId(leaseId)
+                    .fencingToken(fencingToken)
                     .sequence(sequence.incrementAndGet())
                     .messageKind(MessageKind.CONTROL)
                     .operation(CLOSE_OPERATION)

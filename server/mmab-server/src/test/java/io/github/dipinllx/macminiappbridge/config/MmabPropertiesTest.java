@@ -49,10 +49,22 @@ class MmabPropertiesTest {
         MmabProperties p = props(null, List.of());
         assertThat(p.timeouts().ticketTtl()).isEqualTo(Duration.ofSeconds(30));
         assertThat(p.timeouts().leaseTtl()).isEqualTo(Duration.ofSeconds(60));
-        assertThat(p.timeouts().sessionMaxAge()).isEqualTo(Duration.ofHours(8));
-        assertThat(p.timeouts().sessionIdle()).isEqualTo(Duration.ofMinutes(30));
+        // reliable-personal-entry：会话最长 7 天，闲置期限默认等于最长期限
+        assertThat(p.timeouts().sessionMaxAge()).isEqualTo(Duration.ofDays(7));
+        assertThat(p.timeouts().sessionIdle()).isEqualTo(Duration.ofDays(7));
         assertThat(p.testing().allowTestAdapters()).isFalse();
         assertThat(p.web().tlsBundle()).isNull();
+    }
+
+    @Test
+    void sessionLifetimeIsConfigurableAndIdleNeverExceedsIt() {
+        var t = new MmabProperties.Timeouts(null, null, Duration.ofDays(30), null, null, null, null);
+        assertThat(t.sessionMaxAge()).isEqualTo(Duration.ofDays(30));
+        assertThat(t.sessionIdle()).as("idle defaults to the lifetime").isEqualTo(Duration.ofDays(30));
+        var shorter = new MmabProperties.Timeouts(null, null, Duration.ofDays(7), Duration.ofHours(12), null, null, null);
+        assertThat(shorter.sessionIdle()).isEqualTo(Duration.ofHours(12));
+        var clamped = new MmabProperties.Timeouts(null, null, Duration.ofDays(1), Duration.ofDays(3), null, null, null);
+        assertThat(clamped.sessionIdle()).isEqualTo(Duration.ofDays(1));
     }
 
     @Test

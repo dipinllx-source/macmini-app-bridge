@@ -77,7 +77,8 @@ public class AuthController {
             audit.record(created.session().id(), "auth.login", null, "OK", null);
             return ResponseEntity.ok()
                     .header(HttpHeaders.SET_COOKIE,
-                            Requests.sessionCookie(MmabAttributes.CONSOLE_COOKIE, created.token()).toString())
+                            Requests.sessionCookie(MmabAttributes.CONSOLE_COOKIE, created.token(),
+                                    sessions.remaining(created.session().createdAt())).toString())
                     .body(sessionBody(created.session()));
         });
     }
@@ -89,6 +90,37 @@ public class AuthController {
         return ResponseEntity.noContent()
                 .header(HttpHeaders.SET_COOKIE, Requests.expiredCookie(MmabAttributes.CONSOLE_COOKIE).toString())
                 .build();
+    }
+
+    /**
+     * 注销所有会话（reliable-personal-entry：持久会话可随时整体撤销）。需要 CSRF（GuardFilter）并复核口令；
+     * 所有控制台 / 实例会话失效，打开中的数据连接被关闭，各设备上的页面需要重新登录。
+     */
+    @PostMapping("/revoke-all")
+    public Mono<ResponseEntity<Void>> revokeAll(@RequestBody LoginRequest body, ServerWebExchange ex) {
+        ConsoleSession s = Requests.consoleSession(ex);
+        char[] pw = body == null || body.password() == null ? new char[0] : body.password().toCharArray();
+        return Mono.fromCallable(() -> {
+            try {
+                return authenticator.verify(pw);
+            } finally {
+                Arrays.fill(pw, '\0');
+            }
+        }).subscribeOn(Schedulers.boundedElastic()).map(rejection -> {
+            if (rejection.isPresent()) {
+                audit.record(s.id(), "auth.revoke-all", null, rejection.get().name(), null);
+                throw new ApiException(rejection.get() == ErrorCode.RATE_LIMITED
+                        ? HttpStatus.TOO_MANY_REQUESTS : HttpStatus.UNAUTHORIZED, rejection.get());
+            }
+            var revoked = sessions.revokeAll(ErrorCode.UNAUTHENTICATED);
+            for (ConsoleSession c : revoked) {
+                leases.releaseAllHeldBy(c.id(), ErrorCode.UNAUTHENTICATED);
+            }
+            audit.record(s.id(), "auth.revoke-all", null, "OK", "consoles=" + revoked.size());
+            return ResponseEntity.noContent()
+                    .header(HttpHeaders.SET_COOKIE, Requests.expiredCookie(MmabAttributes.CONSOLE_COOKIE).toString())
+                    .<Void>build();
+        });
     }
 
     @GetMapping("/session")

@@ -126,6 +126,12 @@ java -jar server/mmab-server/target/mmab-server-*.jar --spring.profiles.active=o
 | M6 | 可选：iframe 嵌入、多节点 | 未开始 |
 | M7 | 第三应用试接入：核心代码零修改 | 未开始 |
 
+## 会话与数据（reliable-personal-entry）
+
+- 会话默认最长 7 天（`mmab.timeouts.session-max-age`，可配置），期限内用过就不会因闲置失效；平台或浏览器重启后无需重新登录。
+- 会话、审计等元数据存于 `<mmab.data-dir>/mmab.db`（只存令牌散列）；控制台 `POST /__mmab/api/v1/auth/revoke-all` 可注销全部会话。
+- 详见 [ADR-0006](docs/adr/0006-sessions-and-persistence.md)。
+
 ## 安全边界
 
 - 面向**单操作者、可信内网、自有应用**；不是多账号隔离，也不是只读沙箱——网页端拥有与本机应用相同的账号权限。
