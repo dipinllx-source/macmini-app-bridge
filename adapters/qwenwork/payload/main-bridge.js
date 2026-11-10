@@ -11,6 +11,13 @@
 //
 // What it never does: listen on a non-loopback address, serve HTTP, read files, accept unauthenticated frames, or
 // act on the Mac's own windows / tray / shell (deny list below; those calls resolve to undefined).
+//
+// Native file dialogs (file.pick): an electron.dialog.showOpenDialog / showSaveDialog started while handling a
+// browser connection's IPC would open on the Mac's screen, where the remote user cannot see it, and the request would
+// hang. Such calls (and only those: tracked with AsyncLocalStorage) are sent to that browser page as an
+// `mmab:dialog` event instead; the page answers through the driver, which validates the chosen paths first. Dialogs
+// of the Mac's own windows are untouched. While a browser-started dialog runs, BrowserWindow#focus is a no-op so the
+// Mac window is not brought to the front.
 /* eslint-disable no-var */
 function createQwenBridge(deps) {
   'use strict';
@@ -21,6 +28,8 @@ function createQwenBridge(deps) {
   var ipcMain = electron.ipcMain;
   var BrowserWindow = electron.BrowserWindow;
   var log = deps.log || function () {};
+  var als = deps.asyncHooks ? new deps.asyncHooks.AsyncLocalStorage() : null;
+  function inConn(conn, fn) { return als && conn ? als.run({ conn: conn }, fn) : fn(); }
 
   var LINK_VERSION = 'mmab-qwen-link-v1';
   var TRPC = 'trpc-electron';
@@ -122,12 +131,128 @@ function createQwenBridge(deps) {
     return c;
   }
   function closeConn(conn) {
+    seen.delete(conn);
+    cancelDialogs(function (d) { return d.conn === conn; });
     var c = conns.get(conn);
     if (!c) return;
     conns.delete(conn);
     c.byBridge.forEach(function (_v, bid) {
       try { ipcMain.emit(TRPC, makeEvent(null), { method: 'subscription.stop', id: bid }); } catch (e) { /* app gone */ }
     });
+  }
+
+  // ------------------------------------------------------------------ native dialogs -> the browser page (file.pick)
+  var seen = new Map(); // browser connections that sent frames recently: conn -> last frame time
+  var dialogs = new Map(); // id -> {conn, kind, resolve, timer}
+  var dialogSeq = 0;
+  var DIALOG_TTL_MS = 10 * 60 * 1000;
+  var OPEN_PROPS = ['openFile', 'openDirectory', 'multiSelections', 'showHiddenFiles', 'createDirectory'];
+
+  function cancelled(kind) { return kind === 'save' ? { canceled: true, filePath: '' } : { canceled: true, filePaths: [] }; }
+  function cancelDialogs(pred) {
+    dialogs.forEach(function (d, id) {
+      if (!pred(d)) return;
+      dialogs.delete(id);
+      clearTimeout(d.timer);
+      d.resolve(cancelled(d.kind));
+    });
+  }
+  function dialogTarget(conn) {
+    if (conn && seen.has(conn)) return conn;
+    var best = null;
+    var at = -1;
+    seen.forEach(function (t, c) { if (t > at) { at = t; best = c; } });
+    return best; // the origin page reloaded: the operator's newest page answers instead
+  }
+  function sanitizeOptions(kind, o) {
+    o = o && typeof o === 'object' ? o : {};
+    var out = {};
+    ['title', 'defaultPath', 'buttonLabel', 'message', 'nameFieldLabel'].forEach(function (k) {
+      if (typeof o[k] === 'string') out[k] = o[k].slice(0, 4096);
+    });
+    if (Array.isArray(o.filters)) {
+      out.filters = o.filters.slice(0, 20).map(function (f) {
+        return { name: String((f && f.name) || ''), extensions: Array.isArray(f && f.extensions) ? f.extensions.slice(0, 50).map(String) : [] };
+      });
+    }
+    if (kind === 'open') {
+      out.properties = (Array.isArray(o.properties) ? o.properties : ['openFile']).filter(function (p) { return OPEN_PROPS.indexOf(p) >= 0; });
+    }
+    return out;
+  }
+  function remoteDialog(kind, options, store) {
+    var target = dialogTarget(store.conn);
+    if (!target || !link) return null; // no browser page to ask: let the Mac show it
+    var id = ++dialogSeq;
+    return new Promise(function (resolve) {
+      var timer = setTimeout(function () {
+        if (!dialogs.delete(id)) return;
+        emitEvent(target, 'mmab:dialog-cancel', [{ id: id }]);
+        resolve(cancelled(kind));
+      }, DIALOG_TTL_MS);
+      dialogs.set(id, { conn: target, kind: kind, resolve: resolve, timer: timer });
+      emitEvent(target, 'mmab:dialog', [{ id: id, kind: kind, options: sanitizeOptions(kind, options) }]);
+      log('dialog to browser', kind, id);
+    });
+  }
+  function isAbs(p) { return typeof p === 'string' && p.charAt(0) === '/' && p.indexOf(String.fromCharCode(0)) < 0 && p.length < 4096; }
+  /** Answer from the page (paths already validated by the driver). Only the page that was asked may answer. */
+  function answerDialog(conn, req) {
+    if (!req || typeof req.id !== 'number') return { ok: false, reason: 'MALFORMED' };
+    var d = dialogs.get(req.id);
+    if (!d || d.conn !== conn) return { ok: false, reason: 'NO_SUCH_DIALOG' };
+    var res = req.result || {};
+    var value;
+    if (res.canceled === true) value = cancelled(d.kind);
+    else if (d.kind === 'save' && isAbs(res.filePath)) value = { canceled: false, filePath: res.filePath };
+    else if (d.kind === 'open' && Array.isArray(res.filePaths) && res.filePaths.length > 0 && res.filePaths.length <= 200
+      && res.filePaths.every(isAbs)) value = { canceled: false, filePaths: res.filePaths.slice() };
+    else return { ok: false, reason: 'MALFORMED' };
+    dialogs.delete(req.id);
+    clearTimeout(d.timer);
+    d.resolve(value);
+    return { ok: true };
+  }
+  function hookDialogs() {
+    var g = globalThis;
+    var dlg = electron.dialog;
+    if (g.__mmabQwDialogHooked || !als || !dlg) return;
+    var proto = BrowserWindow && BrowserWindow.prototype && typeof BrowserWindow.prototype.focus === 'function'
+      ? BrowserWindow.prototype : null;
+    var rec = {
+      dlg: dlg, open: dlg.showOpenDialog, save: dlg.showSaveDialog, proto: proto,
+      ownFocus: !!proto && Object.prototype.hasOwnProperty.call(proto, 'focus'), focus: proto && proto.focus,
+    };
+    function wrap(kind, orig) {
+      return function () {
+        var store = als.getStore();
+        var options = arguments.length > 1 ? arguments[1] : arguments[0];
+        var p = store ? remoteDialog(kind, options, store) : null;
+        return p || orig.apply(this, arguments);
+      };
+    }
+    rec.openW = wrap('open', rec.open);
+    rec.saveW = wrap('save', rec.save);
+    rec.focusW = function () {
+      if (als.getStore()) return undefined; // a browser-started dialog: leave the Mac's windows where they are
+      return rec.focus.apply(this, arguments);
+    };
+    dlg.showOpenDialog = rec.openW;
+    dlg.showSaveDialog = rec.saveW;
+    if (proto) proto.focus = rec.focusW;
+    g.__mmabQwDialogHooked = rec;
+  }
+  function unhookDialogs() {
+    var g = globalThis;
+    var rec = g.__mmabQwDialogHooked;
+    if (!rec) return;
+    if (rec.dlg.showOpenDialog === rec.openW) rec.dlg.showOpenDialog = rec.open;
+    if (rec.dlg.showSaveDialog === rec.saveW) rec.dlg.showSaveDialog = rec.save;
+    if (rec.proto && rec.proto.focus === rec.focusW) {
+      if (rec.ownFocus) rec.proto.focus = rec.focus;
+      else delete rec.proto.focus;
+    }
+    delete g.__mmabQwDialogHooked;
   }
 
   // ------------------------------------------------------------------ link (one authenticated peer at a time)
@@ -219,17 +344,19 @@ function createQwenBridge(deps) {
       return answer(f.id, { argv: rendererArgv(), platform: process.platform, arch: process.arch,
         versions: { electron: process.versions.electron, chrome: process.versions.chrome, node: process.versions.node } });
     }
+    if (f.kind === 'dialog') return answer(f.id, answerDialog(typeof f.conn === 'string' ? f.conn : null, req));
     if (!req || typeof req.channel !== 'string' || !Array.isArray(req.args)) return fail(f.id, 'MALFORMED_FRAME');
     var ch = req.channel;
     var args = req.args;
     var conn = typeof f.conn === 'string' ? f.conn : null;
+    if (conn) seen.set(conn, Date.now());
     if (f.kind === 'invoke') {
       if (denied(ch)) { log('deny invoke', ch); return answer(f.id, { ok: true, v: undefined }); }
       var h = ipcMain._invokeHandlers && ipcMain._invokeHandlers.get(ch);
       if (!h) return answer(f.id, { ok: false, message: "No handler registered for '" + ch + "'" });
       var ev;
       try { ev = makeEvent(conn ? onReplyFor(conn) : null); } catch (e) { return fail(f.id, e.code || 'ADAPTER_UNAVAILABLE'); }
-      Promise.resolve().then(function () { return h.apply(null, [ev].concat(args)); }).then(
+      inConn(conn, function () { return Promise.resolve().then(function () { return h.apply(null, [ev].concat(args)); }); }).then(
         function (v) { answer(f.id, { ok: true, v: v }); },
         function (e) {
           answer(f.id, { ok: false, message: "Error invoking remote method '" + ch + "': " + ((e && e.message) || e) });
@@ -260,7 +387,7 @@ function createQwenBridge(deps) {
         }
         var sev;
         try { sev = makeEvent(onReplyFor(conn)); } catch (e) { return fail(f.id, e.code || 'ADAPTER_UNAVAILABLE'); }
-        ipcMain.emit.apply(ipcMain, [ch, sev].concat(args));
+        inConn(conn, function () { ipcMain.emit.apply(ipcMain, [ch, sev].concat(args)); });
         return answer(f.id, null);
       }).catch(function () { fail(f.id, 'ADAPTER_UNAVAILABLE'); });
       return undefined;
@@ -314,6 +441,7 @@ function createQwenBridge(deps) {
         if (link) { try { link.sock.destroy(); } catch (e) { /* old link */ } }
         link = { sock: sock, write: write };
         hookSend();
+        hookDialogs();
         write({ t: 'ok', mac: hmac('server', a.nonce, serverNonce) });
         log('link authenticated');
       }
@@ -324,6 +452,8 @@ function createQwenBridge(deps) {
       if (link && link.sock === sock) {
         link = null;
         Array.from(conns.keys()).forEach(closeConn);
+        seen.clear();
+        cancelDialogs(function () { return true; });
         log('link closed');
       }
     });
@@ -346,6 +476,9 @@ function createQwenBridge(deps) {
     },
     stop: function () {
       unhookSend();
+      unhookDialogs();
+      cancelDialogs(function () { return true; });
+      seen.clear();
       if (link) { try { link.sock.destroy(); } catch (e) { /* ignore */ } link = null; }
       Array.from(conns.keys()).forEach(closeConn);
       return new Promise(function (resolve) {
@@ -356,6 +489,7 @@ function createQwenBridge(deps) {
     status: function () {
       return {
         listening: !!server, port: server ? server.address().port : null, linked: !!link, connections: conns.size,
+        dialogs: dialogs.size, dialogHook: !!globalThis.__mmabQwDialogHooked,
         invokeHandlers: ipcMain._invokeHandlers ? ipcMain._invokeHandlers.size : -1,
       };
     },

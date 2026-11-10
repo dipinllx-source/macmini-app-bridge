@@ -38,3 +38,16 @@
    payload 与已有的其他进程内桥共存（独立全局名、独立 tRPC id 段），不中断它们。
 4. 平台配置 `qwen-01`：`enabled: true`（`ui.render` / `ui.history` 已有 live 证据，无需 `verify-capabilities`）。
 5. 回滚：`node adapters/qwenwork/tools/inject.mjs --stop [--reopen-inspector --signal-proof <file>]` 停止 payload、删除交接文件；或直接重启应用（payload 不持久化）。
+
+## 原生对话框（file.pick）
+
+千问的“选择工作目录 / 另存为 / 保存图片 / 导入技能包 / 导入安装包”等都会在 Mac 主进程弹系统对话框，远程页面看不到。
+
+- 选择文件 / 目录（tRPC `files.selectFilesAndFolders`）：shim 在页内处理，不发往 Mac。
+- 其余对话框：payload 用 AsyncLocalStorage 识别“由浏览器连接的 IPC 触发”的 `dialog.showOpenDialog / showSaveDialog`，
+  改为向该页面发 `mmab:dialog` 事件；页面用同一选择器作答（`qwenwork.dialog.answer`），驱动先校验路径
+  （限用户主目录、realpath、另存为父目录必须存在、不能覆盖目录），payload 只接受被询问的那个连接的回答，
+  10 分钟无回答按取消处理。期间 `BrowserWindow#focus` 不生效，Mac 窗口不会被切到前台。
+  Mac 本机窗口自己的对话框不受影响；没有任何网页连接时也回落到本机对话框。
+- 文件始终读写在 Mac 上（与原版语义一致）；“下载到浏览器所在电脑 / 从浏览器上传”尚未支持。
+- payload 变更需重新注入（`tools/inject.mjs`，会替换旧 payload，网页需刷新）。

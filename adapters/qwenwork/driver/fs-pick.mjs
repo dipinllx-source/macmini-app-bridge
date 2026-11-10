@@ -110,5 +110,37 @@ export function createFsPick(o = {}) {
     return { ok: true, paths: out };
   }
 
-  return { list, describe };
+  /**
+   * 另存为的目标：父目录必须存在且在根目录内；文件名不能含路径分隔符；不能是已存在的目录。
+   * @returns {Promise<object>} {ok:true, filePath, exists} 或 {ok:false, reason}
+   */
+  async function checkSave(req) {
+    const rs = await resolvedRoots();
+    const p = req && typeof req.filePath === 'string' ? expand(req.filePath) : '';
+    if (!path.isAbsolute(p)) return { ok: false, reason: 'NOT_ABSOLUTE' };
+    const name = path.basename(p);
+    if (!name || name === '.' || name === '..' || name.length > 255 || /[\/\u0000]/.test(name)) return { ok: false, reason: 'BAD_NAME' };
+    let dir;
+    try {
+      dir = await realpath(path.dirname(p));
+    } catch {
+      return { ok: false, reason: 'NOT_FOUND', path: path.dirname(p) };
+    }
+    if (!rs.some((r) => within(dir, r))) return { ok: false, reason: 'OUTSIDE_ROOT', path: dir };
+    if (!(await stat(dir)).isDirectory()) return { ok: false, reason: 'NOT_DIRECTORY', path: dir };
+    const filePath = path.join(dir, name);
+    let exists = false;
+    try {
+      const st = await stat(filePath);
+      if (st.isDirectory()) return { ok: false, reason: 'IS_DIRECTORY', path: filePath };
+      exists = true;
+      const real = await realpath(filePath); // 已存在的链接不能把写入带出根目录
+      if (!rs.some((r) => within(real, r))) return { ok: false, reason: 'OUTSIDE_ROOT', path: real };
+    } catch (e) {
+      if (e && e.code !== 'ENOENT') return { ok: false, reason: 'ACCESS_DENIED', path: filePath };
+    }
+    return { ok: true, filePath, exists };
+  }
+
+  return { list, describe, checkSave };
 }

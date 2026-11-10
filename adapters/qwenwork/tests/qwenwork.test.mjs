@@ -33,14 +33,26 @@ function fakeElectron() {
     getLastWebPreferences() { return { additionalArguments: ['--qw-test=1'] }; }
     send(ch, ...args) { sent.push([ch, args]); }
   }
-  const win = { webContents: new WebContents(), isDestroyed: () => false };
+  const native = [];
+  const fx = { sent, WebContents, native, focused: 0 };
+  class BrowserWindow {
+    constructor() { this.webContents = new WebContents(); }
+    isDestroyed() { return false; }
+    focus() { fx.focused++; }
+    static getAllWindows() { return [win]; }
+  }
+  const win = new BrowserWindow();
   const ipcMain = new EventEmitter();
   ipcMain._invokeHandlers = new Map();
   ipcMain.handle = (ch, fn) => ipcMain._invokeHandlers.set(ch, fn);
-  return {
-    electron: { ipcMain, BrowserWindow: { getAllWindows: () => [win] }, app: { getLocale: () => 'zh-CN' } },
-    win, sent, WebContents,
+  const dialog = {
+    showOpenDialog: async (...a) => { native.push(['open', a]); return { canceled: true, filePaths: [] }; },
+    showSaveDialog: async (...a) => { native.push(['save', a]); return { canceled: true, filePath: '' }; },
   };
+  return Object.assign(fx, {
+    electron: { ipcMain, BrowserWindow, dialog, app: { getLocale: () => 'zh-CN' } },
+    win,
+  });
 }
 
 function handoffFile(dir, h) {
@@ -52,15 +64,15 @@ function handoffFile(dir, h) {
   return f;
 }
 
-async function setup() {
+async function setup(o = {}) {
   const fx = fakeElectron();
-  const bridge = createQwenBridge({ electron: fx.electron, net, crypto, codec: globalThis.MmabCodec });
+  const bridge = createQwenBridge({ electron: fx.electron, net, crypto, codec: globalThis.MmabCodec, asyncHooks: o.asyncHooks });
   const key = crypto.randomBytes(32);
   const { port } = await bridge.start(key.toString('base64'));
   const dir = mkdtempSync(path.join(os.tmpdir(), 'mmab-qw-'));
   const linkFile = handoffFile(dir, { v: 1, pid: 4242, started: 'test', port, key: key.toString('base64') });
   const verified = [];
-  const driver = createDriver({ linkFile, verify: (h) => verified.push(h.pid) });
+  const driver = createDriver({ linkFile, verify: (h) => verified.push(h.pid), pickRoots: o.pickRoots });
   const adapter = await inProcess({ handlers: driver.handlers, onConnectionClosed: driver.onConnectionClosed });
   driver.bind(adapter.api);
   const p = await platform(adapter);
@@ -89,7 +101,9 @@ async function setup() {
     await bridge.stop();
     rmSync(dir, { recursive: true, force: true });
   };
-  return { fx, bridge, key, port, p, call, waitFor, verified, done, linkFile };
+  // fire a request without waiting; returns its correlation id
+  const fire = (conn, op, value) => p.request(conn, op, encode(value));
+  return { fx, bridge, key, port, p, call, fire, waitFor, verified, done, linkFile };
 }
 
 test('bootstrap, invoke with main-window identity, unknown channel and deny list', async () => {
@@ -371,8 +385,9 @@ test('file.pick: lists only inside the allowed root, hides dot entries, never fo
   }
 });
 
-test('browser shim: native file dialogs never reach the Mac; folder picks are answered in the page', async () => {
+test('browser shim: folder picks are answered in the page; forwarded native dialogs open the page picker', async () => {
   const requests = [];
+  let onEvent;
   const pickerCalls = [];
   const toasts = [];
   const win = {
@@ -391,10 +406,11 @@ test('browser shim: native file dialogs never reach the Mac; folder picks are an
       toast: (t) => toasts.push(t),
     },
     MmabTransport: {
-      create: () => ({
+      create: (o) => ({
+        _: (onEvent = o.onEvent),
         request: (op, value) => {
           requests.push([op, value]);
-          return Promise.resolve(op === 'qwenwork.fs.list' ? { ok: true, path: '/Users/u', entries: [] } : null);
+          return Promise.resolve(op === 'qwenwork.fs.list' ? { ok: true, path: '/Users/u', entries: [] } : { ok: true });
         },
         call: () => ({ platform: 'darwin', arch: 'arm64', argv: [], versions: {} }),
       }),
@@ -408,21 +424,110 @@ test('browser shim: native file dialogs never reach the Mac; folder picks are an
 
   ipcRenderer.send('trpc-electron', { method: 'request', operation: { id: 7, type: 'mutation',
     path: 'files.selectFilesAndFolders', input: { json: { type: 'folders', multiSelect: false, allowCreateDirectory: true } } } });
-  ipcRenderer.send('trpc-electron', { method: 'request', operation: { id: 8, type: 'mutation',
-    path: 'files.showSaveDialog', input: { json: { title: 'x' } } } });
   ipcRenderer.send('trpc-electron', { method: 'request', operation: { id: 9, type: 'query', path: 'localProjects.list' } });
   await sleep(20);
 
   assert.deepEqual(requests.map((r) => r[0]), ['qwenwork.fs.list', 'qwenwork.send'],
-    'only the ordinary query is forwarded to the Mac');
+    'the folder pick stays in the page; the ordinary query is forwarded');
   assert.equal(requests[1][1].args[0].operation.path, 'localProjects.list');
   assert.equal(pickerCalls.length, 1);
   assert.equal(pickerCalls[0].type, 'folders');
   assert.equal(pickerCalls[0].multiSelect, false);
   assert.deepEqual(JSON.parse(JSON.stringify(replies.find((m) => m.id === 7))), { id: 7, result: { type: 'data', data: { json: {
     canceled: false, paths: [{ path: '/Users/u/proj', name: 'proj', type: 'folder', size: 0 }] } } } });
-  const err = replies.find((m) => m.id === 8);
-  assert.equal(err.error.json.data.path, 'files.showSaveDialog');
-  assert.match(err.error.json.message, /暂不支持/);
-  assert.equal(toasts.length, 1);
+
+  // payload-forwarded native dialogs (save as / import): picker in the page, answer through the driver
+  requests.length = 0;
+  pickerCalls.length = 0;
+  win.__mmabQwPicker.open = (o) => {
+    pickerCalls.push(o);
+    return Promise.resolve(o.mode === 'save' ? { canceled: false, filePath: '/Users/u/Downloads/a.png' }
+      : { canceled: false, paths: [{ path: '/Users/u/skill.zip', name: 'skill.zip', type: 'file', size: 9 }] });
+  };
+  onEvent('qwenwork.ipc', { channel: 'mmab:dialog', args: [{ id: 3, kind: 'save', options: { defaultPath: '/Users/u/Downloads/x.png', filters: [{ name: 'PNG', extensions: ['png'] }] } }] });
+  onEvent('qwenwork.ipc', { channel: 'mmab:dialog', args: [{ id: 4, kind: 'open', options: { properties: ['openFile'], filters: [{ name: 'ZIP', extensions: ['zip'] }] } }] });
+  await sleep(20);
+  assert.equal(pickerCalls[0].mode, 'save');
+  assert.equal(pickerCalls[0].defaultPath, '/Users/u/Downloads/x.png');
+  assert.equal(pickerCalls[1].type, 'files');
+  assert.equal(pickerCalls[1].multiSelect, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(requests)), [
+    ['qwenwork.dialog.answer', { id: 3, kind: 'save', result: { canceled: false, filePath: '/Users/u/Downloads/a.png' } }],
+    ['qwenwork.dialog.answer', { id: 4, kind: 'open', result: { canceled: false, filePaths: ['/Users/u/skill.zip'] } }],
+  ]);
+  assert.equal(replies.filter((m) => m.id === 3 || m.id === 4).length, 0, 'dialog events never reach the app listeners');
+  assert.equal(toasts.length, 0);
+});
+
+test('payload: dialogs started by a browser connection go to that page; the Mac keeps its own dialogs', async () => {
+  const asyncHooks = await import('node:async_hooks');
+  const base = mkdtempSync(path.join(os.tmpdir(), 'mmab-dlg-'));
+  const { realpathSync, symlinkSync } = await import('node:fs');
+  const root = realpathSync(base);
+  mkdirSync(path.join(root, 'Downloads'));
+  writeFileSync(path.join(root, 'skill.zip'), 'zip');
+  symlinkSync(os.tmpdir(), path.join(root, 'out'));
+  const s = await setup({ asyncHooks, pickRoots: [root] });
+  try {
+    const { electron, win } = s.fx;
+    electron.ipcMain.handle('files:save-as', async () => {
+      win.focus();
+      return electron.dialog.showSaveDialog(win, { title: 'Save', defaultPath: path.join(root, 'Downloads', 'a.png'), filters: [{ name: 'PNG', extensions: ['png'] }], bogus: 1 });
+    });
+    let picked;
+    electron.ipcMain.on('skills:pick', async () => {
+      picked = await electron.dialog.showOpenDialog({ properties: ['openFile', 'evilProp'], filters: [{ name: 'ZIP', extensions: ['zip'] }] });
+    });
+    const dialogEvent = async () => {
+      const e = await s.waitFor((f) => f.messageKind === 'EVENT' && f.operation === 'qwenwork.ipc'
+        && decode(f.payload).channel === 'mmab:dialog');
+      assert.ok(e, 'dialog event reached the page');
+      return { conn: e.connectionId, d: decode(e.payload).args[0] };
+    };
+    // save as, started from browser connection c-1
+    const cid = s.fire('c-1', 'qwenwork.invoke', { channel: 'files:save-as', args: [] });
+    const { conn, d } = await dialogEvent();
+    assert.equal(conn, 'c-1');
+    assert.equal(d.kind, 'save');
+    assert.deepEqual(d.options, { title: 'Save', defaultPath: path.join(root, 'Downloads', 'a.png'), filters: [{ name: 'PNG', extensions: ['png'] }] });
+    assert.equal(s.fx.native.length, 0, 'nothing opened on the Mac');
+    assert.equal(s.fx.focused, 0, 'the Mac window is not brought to the front');
+    const ans = async (c, v) => decode((await s.call(c, 'qwenwork.dialog.answer', v)).payload);
+    assert.equal((await ans('c-1', { id: d.id, kind: 'save', result: { filePath: path.join(root, 'out', 'x.png') } })).reason, 'OUTSIDE_ROOT');
+    assert.equal((await ans('c-1', { id: d.id, kind: 'save', result: { filePath: path.join(root, 'Downloads') } })).reason, 'IS_DIRECTORY');
+    assert.equal((await ans('c-2', { id: d.id, kind: 'save', result: { filePath: path.join(root, 'Downloads', 'b.png') } })).reason,
+      'NO_SUCH_DIALOG', 'only the page that was asked may answer');
+    assert.deepEqual(await ans('c-1', { id: d.id, kind: 'save', result: { filePath: path.join(root, 'Downloads', 'b.png') } }), { ok: true });
+    const res = await s.waitFor((f) => f.messageKind === 'RESPONSE' && f.correlationId === cid);
+    assert.deepEqual(decode(res.payload), { ok: true, v: { canceled: false, filePath: path.join(root, 'Downloads', 'b.png') } });
+    assert.equal((await ans('c-1', { id: d.id, kind: 'save', result: { canceled: true } })).reason, 'NO_SUCH_DIALOG', 'answered once');
+
+    // open dialog started through a plain send (the tRPC path uses send too)
+    await s.call('c-1', 'qwenwork.send', { channel: 'skills:pick', args: [] });
+    const o = await dialogEvent();
+    assert.deepEqual(o.d.options.properties, ['openFile'], 'unknown dialog properties are dropped');
+    assert.equal((await ans('c-1', { id: o.d.id, kind: 'open', result: { filePaths: ['/etc/hosts'] } })).reason, 'OUTSIDE_ROOT');
+    assert.deepEqual(await ans('c-1', { id: o.d.id, kind: 'open', result: { filePaths: [path.join(root, 'skill.zip')] } }), { ok: true });
+    await sleep(20);
+    assert.deepEqual(picked, { canceled: false, filePaths: [path.join(root, 'skill.zip')] });
+
+    // the Mac's own window: native dialog and focus as before
+    await electron.ipcMain._invokeHandlers.get('files:save-as')({});
+    assert.equal(s.fx.native.length, 1);
+    assert.equal(s.fx.focused, 1);
+
+    // a pending dialog is cancelled when its page goes away
+    s.fire('c-1', 'qwenwork.invoke', { channel: 'files:save-as', args: [] });
+    await dialogEvent();
+    assert.equal(s.bridge.status().dialogs, 1);
+    await s.bridge.stop();
+    assert.equal(s.bridge.status().dialogs, 0);
+    assert.equal(s.bridge.status().dialogHook, false, 'stop restores electron.dialog');
+    await electron.dialog.showOpenDialog({});
+    assert.equal(s.fx.native.length, 2);
+    assert.ok(!Object.prototype.hasOwnProperty.call(electron.BrowserWindow.prototype, 'focus') || electron.BrowserWindow.prototype.focus.name === 'focus');
+  } finally {
+    await s.done();
+    rmSync(base, { recursive: true, force: true });
+  }
 });

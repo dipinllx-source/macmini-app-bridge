@@ -10,10 +10,11 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { runAdapter } from '../../../sdk/driver-node/adapter-runtime.mjs';
 import { LinkError, connectLink } from './link-client.mjs';
+import { decode, encode } from '../../../sdk/web/codec.mjs';
 import { createFsPick } from './fs-pick.mjs';
 import { defaultLinkFile, readHandoff, verifyHandoff } from './process-check.mjs';
 
-export const ADAPTER_VERSION = '0.4.0';
+export const ADAPTER_VERSION = '0.5.0';
 const RETRY_MS = 2000;
 
 /**
@@ -77,6 +78,30 @@ export function createDriver(o = {}) {
       // file.pick：网页版选择器的数据源，在驱动进程内完成，不经过千问主进程
       'qwenwork.fs.list': (value) => pick.list(value),
       'qwenwork.fs.describe': (value) => pick.describe(value),
+      'qwenwork.fs.checkSave': (value) => pick.checkSave(value),
+      // 千问主进程转给网页的原生对话框（payload 的 mmab:dialog 事件）的回答：先在这里校验路径，再交给 payload
+      'qwenwork.dialog.answer': async (value, ctx) => {
+        const v = value && typeof value === 'object' ? value : {};
+        if (!Number.isSafeInteger(v.id)) return { ok: false, reason: 'MALFORMED' };
+        const res = v.result && typeof v.result === 'object' ? v.result : {};
+        let result;
+        if (res.canceled === true) {
+          result = { canceled: true };
+        } else if (v.kind === 'save') {
+          const c = await pick.checkSave({ filePath: res.filePath });
+          if (!c.ok) return c;
+          result = { canceled: false, filePath: c.filePath };
+        } else if (v.kind === 'open') {
+          const d = await pick.describe({ paths: Array.isArray(res.filePaths) ? res.filePaths : [] });
+          if (!d.ok) return d;
+          if (!d.paths.length) return { ok: false, reason: 'MALFORMED' };
+          result = { canceled: false, filePaths: d.paths.map((x) => x.path) };
+        } else {
+          return { ok: false, reason: 'MALFORMED' };
+        }
+        const l = await ensureLink();
+        return decode(await l.call('dialog', ctx.connectionId, encode({ id: v.id, result })));
+      },
     },
     onConnectionClosed(conn) {
       if (link && !link.closed) link.closeConnection(conn);

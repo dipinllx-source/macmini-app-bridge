@@ -40,6 +40,8 @@
     onLost: function () { root.location.reload(); },
     onEvent: function (op, value) {
       if (op !== 'qwenwork.ipc' || !value || typeof value.channel !== 'string' || !Array.isArray(value.args)) return;
+      if (value.channel === 'mmab:dialog') return onNativeDialog(value.args[0]);
+      if (value.channel === 'mmab:dialog-cancel') return onNativeDialogCancel(value.args[0]);
       dispatch(value.channel, value.args);
     },
   });
@@ -56,51 +58,79 @@
     root.open(u, '_blank', 'noopener');
     return undefined;
   }
-  // ------------------------------------------------------------------ 原生对话框（tRPC）
-  // 这些 tRPC 调用在主进程弹 electron.dialog —— 面板出现在 Mac 屏幕上，远程页面看不到，请求会一直挂起。
-  // 选择文件 / 目录改走页内选择器（file.pick，qwen-picker.js）；保存类对话框暂不支持，立即报错而不是挂起。
+  // ------------------------------------------------------------------ 原生对话框
+  // 千问在 Mac 主进程弹 electron.dialog —— 面板出现在 Mac 屏幕上，远程页面看不到，请求会一直挂起。
+  // 1) 选择文件 / 目录（files.selectFilesAndFolders）直接在页内处理，不发往 Mac；
+  // 2) 其余对话框（另存为、保存图片、导入技能包、导入安装包……）由 payload 拦下并发来 mmab:dialog 事件，
+  //    在页内选择后经驱动校验回答，应用随后照常在 Mac 上读写所选路径。
   var TRPC = 'trpc-electron';
-  var NATIVE_DIALOG_ONLY = {
-    'files.showSaveDialog': '另存为', 'files.saveAs': '另存为', 'files.saveImageAs': '保存图片',
-    'files.saveTextDocumentAs': '另存为', 'skills.selectSkillZip': '导入技能包',
-    'commonCliConnectors.selectPackage': '导入安装包',
-  };
   function trpcAnswer(msg) {
     root.setTimeout(function () { dispatch(TRPC, [msg]); }, 0); // 与真实 IPC 一样异步到达
   }
   function trpcData(id, data) {
     trpcAnswer({ id: id, result: { type: 'data', data: { json: data } } }); // 应用使用 superjson：{json}
   }
-  function trpcError(id, path, message) {
-    trpcAnswer({ id: id, error: { json: { message: message, code: -32603,
-      data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500, path: path } } } });
+  var pickerApi = {
+    list: function (v) { return t.request('qwenwork.fs.list', v); },
+    describe: function (v) { return t.request('qwenwork.fs.describe', v); },
+    checkSave: function (v) { return t.request('qwenwork.fs.checkSave', v); },
+  };
+  function openPicker(o) {
+    var picker = root.__mmabQwPicker;
+    if (!picker) return Promise.resolve(null);
+    return picker.open(Object.assign(o, pickerApi));
   }
   function pickPaths(op) {
     var input = (op.input && op.input.json) || {};
-    var picker = root.__mmabQwPicker;
-    if (!picker) return trpcData(op.id, { canceled: true, paths: [] });
-    picker.open({
-      type: input.type, title: input.title, defaultPath: input.defaultPath,
+    openPicker({
+      type: input.type, title: input.title, defaultPath: input.defaultPath, filters: input.filters,
       multiSelect: input.multiSelect !== false,
-      list: function (v) { return t.request('qwenwork.fs.list', v); },
-      describe: function (v) { return t.request('qwenwork.fs.describe', v); },
-    }).then(function (res) { trpcData(op.id, res); }, function () { trpcData(op.id, { canceled: true, paths: [] }); });
+    }).then(function (res) { trpcData(op.id, res || { canceled: true, paths: [] }); },
+      function () { trpcData(op.id, { canceled: true, paths: [] }); });
   }
   /** @returns {boolean} true = 已在页内处理，不再发往 Mac */
   function interceptTrpc(msg) {
-    if (!msg || msg.method !== 'request' || !msg.operation || typeof msg.operation.path !== 'string') return false;
-    var op = msg.operation;
-    if (op.path === 'files.selectFilesAndFolders') {
-      pickPaths(op);
-      return true;
+    if (!msg || msg.method !== 'request' || !msg.operation || msg.operation.path !== 'files.selectFilesAndFolders') return false;
+    pickPaths(msg.operation);
+    return true;
+  }
+
+  var openDialogs = new Map(); // payload dialog id -> picker options (for close on timeout)
+  function answerDialog(d, result) {
+    openDialogs.delete(d.id);
+    t.request('qwenwork.dialog.answer', { id: d.id, kind: d.kind, result: result }).then(function (r) {
+      if (r && r.ok === false && root.__mmabQwPicker) root.__mmabQwPicker.toast('操作未完成：' + (r.reason || '路径不可用'));
+    }, function (e) {
+      if (root.__mmabQwPicker) root.__mmabQwPicker.toast('操作未完成：' + ((e && e.code) || '连接异常'));
+    });
+  }
+  function onNativeDialog(d) {
+    if (!d || typeof d.id !== 'number') return;
+    var opts = d.options || {};
+    var po;
+    if (d.kind === 'save') {
+      po = { mode: 'save', title: opts.title, defaultPath: opts.defaultPath, filters: opts.filters, buttonLabel: opts.buttonLabel };
+    } else {
+      var props = opts.properties || [];
+      var dirs = props.indexOf('openDirectory') >= 0;
+      var files = props.indexOf('openFile') >= 0 || !dirs;
+      po = { type: dirs && files ? 'both' : dirs ? 'folders' : 'files', title: opts.title || opts.message,
+        defaultPath: opts.defaultPath, filters: opts.filters, buttonLabel: opts.buttonLabel,
+        multiSelect: props.indexOf('multiSelections') >= 0 };
     }
-    if (Object.prototype.hasOwnProperty.call(NATIVE_DIALOG_ONLY, op.path)) {
-      var what = NATIVE_DIALOG_ONLY[op.path];
-      if (root.__mmabQwPicker) root.__mmabQwPicker.toast('“' + what + '”需要 Mac 上的系统对话框，远程网页暂不支持。');
-      trpcError(op.id, op.path, '远程网页暂不支持“' + what + '”（需要 Mac 上的系统对话框）');
-      return true;
-    }
-    return false;
+    openDialogs.set(d.id, po);
+    openPicker(po).then(function (res) {
+      if (!openDialogs.has(d.id)) return; // 已被 Mac 端撤销
+      if (!res || res.canceled) return answerDialog(d, { canceled: true });
+      if (d.kind === 'save') return answerDialog(d, { canceled: false, filePath: res.filePath });
+      return answerDialog(d, { canceled: false, filePaths: res.paths.map(function (x) { return x.path; }) });
+    }, function () { answerDialog(d, { canceled: true }); });
+  }
+  function onNativeDialogCancel(d) {
+    var po = d && openDialogs.get(d.id);
+    if (!po) return;
+    openDialogs.delete(d.id);
+    if (po.close) po.close();
   }
 
   var LOCAL = {

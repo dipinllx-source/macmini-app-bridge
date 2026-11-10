@@ -5,7 +5,7 @@
 schemaVersion: 1
 appId: qwenwork
 displayName: 千问办公
-version: 0.4.0
+version: 0.5.0
 strategy: electron-main-inject
 protocol: { min: "1.0", max: "1.0" }
 app:
@@ -31,7 +31,7 @@ capabilities:
   stream.push: UNVERIFIED
   file.upload: UNSUPPORTED   # 平台路径尚未实现
   file.drop: UNSUPPORTED
-  file.pick: SUPPORTED       # 网页内目录 / 文件选择器替代原生对话框（driver/fs-pick.mjs，仅限用户主目录，只列名称）
+  file.pick: SUPPORTED       # 网页内打开 / 另存为选择器替代 Mac 原生对话框（driver/fs-pick.mjs，仅限用户主目录，只列名称）
   clipboard.write: UNVERIFIED  # 浏览器本地写入，未在平台路径验证
   clipboard.read: UNSUPPORTED
   media.voice: UNVERIFIED
@@ -46,6 +46,8 @@ operations:
   qwenwork.ipc: { capability: ui.render, kind: event }
   qwenwork.fs.list: { capability: file.pick, kind: request }
   qwenwork.fs.describe: { capability: file.pick, kind: request }
+  qwenwork.fs.checkSave: { capability: file.pick, kind: request }
+  qwenwork.dialog.answer: { capability: file.pick, kind: request }
 web:
   inject:
     - platform:codec.js

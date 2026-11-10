@@ -36,7 +36,7 @@ export function payloadExpression(keyB64) {
   const g = globalThis;
   if (g.__mmabQwenBridge) { try { await g.__mmabQwenBridge.stop(); } catch (e) {} }
   const r = process.mainModule.require;
-  g.__mmabQwenBridge = createQwenBridge({ electron: r('electron'), net: r('net'), crypto: r('crypto'), codec: __holder.MmabCodec });
+  g.__mmabQwenBridge = createQwenBridge({ electron: r('electron'), net: r('net'), crypto: r('crypto'), asyncHooks: r('async_hooks'), codec: __holder.MmabCodec });
   return g.__mmabQwenBridge.start(${JSON.stringify(keyB64)});
 })()`;
 }
