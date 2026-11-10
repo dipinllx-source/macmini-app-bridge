@@ -72,7 +72,7 @@ body {
 .skill.SUPPORTED { background: #e3fbe7; border-color: #3ad15a; color: #17752c; }
 .skill.UNVERIFIED { background: #fff6d6; border-color: #f6c23e; color: #8a6400; }
 .skill.DISABLED { background: #eef0f6; border-color: #b7bccd; color: #6b7086; }
-.skill.UNSUPPORTED { background: #f6f6f6; border-color: #dcdcdc; color: #a0a0a0; text-decoration: line-through; }
+.skill.UNSUPPORTED { background: #f4f4f6; border-color: #c9cbd6; border-style: dashed; color: #6b7086; }
 
 /* HP 条 */
 .hp { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 800; }

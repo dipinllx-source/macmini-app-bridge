@@ -77,7 +77,7 @@ onMounted(() => load())
     <div class="filters">
       <select v-model="filterInstance" @change="load()">
         <option value="">全部应用</option>
-        <option value="qwen-01">千问</option>
+        <option value="qwen-01">千问办公</option>
         <option value="codex-01">Codex</option>
         <option value="mock-01">Mock</option>
       </select>

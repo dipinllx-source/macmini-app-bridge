@@ -3,6 +3,7 @@ import DexIcon from '../components/DexIcon.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { listAudit, listInstances, openInstance, type ApiError, type AuditRow, type LiveInstance } from '../api/bridge'
 import { describeError, useSession } from '../composables/useSession'
+import { CAP_LABEL, SKILL_LABEL, iconUrl, leaseText, mood, profile, typeOf as type } from '../dex'
 
 const { expired } = useSession()
 const instances = ref<LiveInstance[]>([])
@@ -13,46 +14,7 @@ const opening = ref<string | null>(null)
 const iconFailed = ref<Record<string, boolean>>({})
 let timer: number | undefined
 
-// ------------------------------------------------------------------ 每个应用的“图鉴资料”
-const PROFILE: Record<string, { fallback: string; color: string; tagline: string }> = {
-  qwenwork: { fallback: 'app', color: '#8b7cf6', tagline: '千问办公 · 主进程注入' },
-  codex: { fallback: 'app', color: '#f5b400', tagline: 'Codex · 页面进程调试接口' },
-  mock: { fallback: 'flask', color: '#9aa0a6', tagline: '离线测试用的小家伙' },
-}
-const TYPES: Record<string, { label: string; cls: string }> = {
-  'electron-main-inject': { label: '注入系', cls: 'inject' },
-  'electron-renderer-cdp': { label: '电气系', cls: 'cdp' },
-  'test-mock': { label: '一般系', cls: 'mock' },
-}
-const SKILL_LABEL: Record<string, string> = { SUPPORTED: '已掌握', UNVERIFIED: '修炼中', DISABLED: '已封印', UNSUPPORTED: '未习得' }
-const CAP_LABEL: Record<string, string> = {
-  'ui.render': '原版界面', 'ui.history': '历史会话', 'ui.compose': '发消息', 'stream.push': '实时推送',
-  'file.upload': '上传附件', 'file.drop': '拖放文件', 'clipboard.write': '复制', 'clipboard.read': '粘贴读取',
-  'media.voice': '语音', 'app.git': 'Git', 'app.extension': '插件',
-}
-
-function profile(i: LiveInstance) {
-  return PROFILE[i.appId] ?? { fallback: 'app', color: '#68a090', tagline: i.appId }
-}
-function type(i: LiveInstance) {
-  return TYPES[i.strategy] ?? { label: '未知系', cls: 'unknown' }
-}
-
-/** 实态 → HP 条与心情。 */
-function mood(i: LiveInstance) {
-  switch (i.state) {
-    case 'READY': return { hp: 100, cls: 'green', text: '精神饱满', pulse: false }
-    case 'STARTING': return { hp: 60, cls: 'yellow', text: '正在苏醒…', pulse: true }
-    case 'BLOCKED': return { hp: 30, cls: 'red', text: blockedText(i.blockedReason), pulse: false }
-    case 'ADAPTER_DOWN': return { hp: 12, cls: 'red', text: '累倒了（适配器不可用）', pulse: true }
-    default: return { hp: 0, cls: 'grey', text: '在休息（未启用）', pulse: false }
-  }
-}
-function blockedText(reason: string | null) {
-  if (reason === 'BLOCKED_UPGRADE') return '被封印：本地应用已升级，等待适配'
-  if (reason === 'COMPATIBILITY_BLOCKED') return '被封印：版本不兼容'
-  return `被封印：${reason ?? '原因未知'}`
-}
+// 图鉴资料（外观、类型徽章、能力文案）见 ../dex.ts
 function buttonText(i: LiveInstance) {
   if (opening.value === i.id) return '召唤中…'
   if (!i.enabled) return '休息中'
@@ -64,11 +26,6 @@ function buttonHint(i: LiveInstance) {
   if (i.lease.held && !i.lease.mine) return '同一时间只允许一个页面使用该应用；关闭另一个页面，或等它断开后会自动让位'
   if (!i.openable) return mood(i).text
   return '在新标签页打开原版界面'
-}
-function leaseText(i: LiveInstance) {
-  if (i.lease.mine) return { text: '出战中（你）', cls: 'mine' }
-  if (i.lease.held) return { text: '在别处出战', cls: 'busy' }
-  return { text: '待命', cls: 'idle' }
 }
 const visibleCaps = (i: LiveInstance) =>
   Object.entries(i.capabilities ?? {}).filter(([, s]) => s !== 'UNSUPPORTED')
@@ -181,7 +138,7 @@ onUnmounted(() => {
           :class="{ off: !i.enabled }" :style="{ animationDelay: `${idx * 80}ms`, '--accent': profile(i).color }">
           <div class="card-head">
             <div class="avatar" :class="{ sleepy: i.state !== 'READY' }">
-              <img v-if="!iconFailed[i.id]" :src="`/__mmab/api/v1/instances/${encodeURIComponent(i.id)}/icon`"
+              <img v-if="!iconFailed[i.id]" :src="iconUrl(i.id)"
                 :alt="i.displayName" draggable="false" @error="iconFailed[i.id] = true" />
               <DexIcon v-else class="fallback-icon" :name="profile(i).fallback" :size="48" />
             </div>

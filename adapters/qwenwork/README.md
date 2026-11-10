@@ -1,6 +1,6 @@
 # adapters/qwenwork
 
-千问（QwenWork）参考适配器，策略族 **S1 electron-main-inject**（主进程注入）。M3。
+千问办公（QwenWork）参考适配器，策略族 **S1 electron-main-inject**（主进程注入）。M3。
 
 ```text
 浏览器（原版 renderer + 注入脚本）            mmab-server                 qwenwork driver            千问主进程

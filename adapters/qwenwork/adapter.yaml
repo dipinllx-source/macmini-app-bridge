@@ -1,10 +1,10 @@
-# MMAB adapter descriptor - 千问（qwenwork，策略族 S1：主进程注入）
+# MMAB adapter descriptor - 千问办公（qwenwork，策略族 S1：主进程注入）
 # 能力状态取自原型验收结论；evidence 是“经平台路径”的最强证据（ADR-0005）。
 # 2026-11-09 已在正式实例（千问 2.0.0）上经平台完成界面渲染与历史会话验收（docs/m3-acceptance.md），
 # 因此 ui.render / ui.history 为 live；发消息（ui.compose）尚未经平台验收。
 schemaVersion: 1
 appId: qwenwork
-displayName: 千问
+displayName: 千问办公
 version: 0.3.0
 strategy: electron-main-inject
 protocol: { min: "1.0", max: "1.0" }

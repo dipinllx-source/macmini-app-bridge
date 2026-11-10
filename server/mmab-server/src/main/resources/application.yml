@@ -75,7 +75,7 @@ mmab:
   instances:
     - id: qwen-01
       app-id: qwenwork
-      display-name: 千问
+      display-name: 千问办公
       port: 8444
       strategy: electron-main-inject
       enabled: false

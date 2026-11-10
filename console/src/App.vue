@@ -83,7 +83,9 @@ async function submit() {
 
     <main v-else-if="loggedIn" class="body">
       <nav class="tabs">
-        <router-link v-for="n in nav" :key="n.to" :to="n.to" class="tab" active-class="" exact-active-class="active">
+        <router-link v-for="n in nav" :key="n.to" :to="n.to" class="tab"
+          :class="{ active: $route.path === n.to || (n.to === '/' && $route.path.startsWith('/instances/')) }"
+          active-class="" exact-active-class="">
           <DexIcon class="tab-icon" :name="n.icon" :size="21" />{{ n.label }}
         </router-link>
       </nav>
