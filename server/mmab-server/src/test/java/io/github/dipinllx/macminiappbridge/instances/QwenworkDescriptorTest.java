@@ -22,7 +22,8 @@ class QwenworkDescriptorTest {
 
         // preload emulation needs the transport before the wrapped original preload, in this order
         assertThat(d.web().inject()).containsExactly("platform:codec.js", "platform:transport.js",
-                "platform:electron-compat.js", "adapter:qwen-electron.js", "resource:/mmab-preload.js");
+                "platform:electron-compat.js", "adapter:qwen-picker.js", "adapter:qwen-electron.js",
+                "resource:/mmab-preload.js");
 
         // live evidence on the platform path (2026-11-09): the declared surface is open without an operator grant
         assertThat(d.gateRequest("qwenwork.invoke")).isEmpty();
@@ -32,6 +33,12 @@ class QwenworkDescriptorTest {
         assertThat(d.gateSyncRequest("qwenwork.invoke")).as("invoke is not a sync operation").isPresent();
         assertThat(d.eventAllowed("qwenwork.ipc")).isTrue();
         assertThat(d.gateRequest("qwenwork.unknown")).contains(ErrorCode.UNKNOWN_OPERATION);
+        // file.pick（网页内目录选择器的数据源）尚无 live 证据：默认关闭，操作者授权验证窗口后开放
+        assertThat(d.gateRequest("qwenwork.fs.list")).isPresent();
+        assertThat(d.gateRequest("qwenwork.fs.describe")).isPresent();
+        AdapterDescriptor granted = d.withGrants(Set.of(StandardCapability.FILE_PICK));
+        assertThat(granted.gateRequest("qwenwork.fs.list")).isEmpty();
+        assertThat(granted.gateRequest("qwenwork.fs.describe")).isEmpty();
         assertThatThrownBy(() -> d.withGrants(Set.of(StandardCapability.UI_RENDER)))
                 .as("nothing left to grant once live evidence exists").isInstanceOf(IllegalArgumentException.class);
     }

@@ -19,7 +19,7 @@ export const SKILL_HINT: Record<string, string> = {
 }
 export const CAP_LABEL: Record<string, string> = {
   'ui.render': '原版界面', 'ui.history': '历史会话', 'ui.compose': '发消息', 'stream.push': '实时推送',
-  'file.upload': '上传附件', 'file.drop': '拖放文件', 'clipboard.write': '复制', 'clipboard.read': '粘贴读取',
+  'file.upload': '上传附件', 'file.drop': '拖放文件', 'file.pick': '选择本机目录', 'clipboard.write': '复制', 'clipboard.read': '粘贴读取',
   'media.voice': '语音', 'app.git': 'Git', 'app.extension': '插件',
 }
 export const STATE_LABEL: Record<string, string> = {

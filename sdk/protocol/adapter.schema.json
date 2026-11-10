@@ -162,6 +162,9 @@
         "file.drop": {
           "$ref": "#/$defs/capabilityState"
         },
+        "file.pick": {
+          "$ref": "#/$defs/capabilityState"
+        },
         "clipboard.write": {
           "$ref": "#/$defs/capabilityState"
         },
@@ -234,6 +237,7 @@
               "stream.push",
               "file.upload",
               "file.drop",
+              "file.pick",
               "clipboard.write",
               "clipboard.read",
               "media.voice",
@@ -359,6 +363,13 @@
           ]
         },
         "file.drop": {
+          "enum": [
+            "offline",
+            "isolated-live",
+            "live"
+          ]
+        },
+        "file.pick": {
           "enum": [
             "offline",
             "isolated-live",

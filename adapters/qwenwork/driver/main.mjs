@@ -10,9 +10,10 @@ import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { runAdapter } from '../../../sdk/driver-node/adapter-runtime.mjs';
 import { LinkError, connectLink } from './link-client.mjs';
+import { createFsPick } from './fs-pick.mjs';
 import { defaultLinkFile, readHandoff, verifyHandoff } from './process-check.mjs';
 
-export const ADAPTER_VERSION = '0.3.0';
+export const ADAPTER_VERSION = '0.4.0';
 const RETRY_MS = 2000;
 
 /**
@@ -20,6 +21,7 @@ const RETRY_MS = 2000;
  * @param {string} [o.linkFile]
  * @param {(h: object) => void} [o.verify] process identity check (tests replace it; production uses verifyHandoff)
  * @param {(f: string) => object} [o.read]
+ * @param {string[]} [o.pickRoots] file.pick 允许列举的根目录（默认用户主目录；环境变量 MMAB_PICK_ROOTS 以 : 分隔）
  */
 export function createDriver(o = {}) {
   const linkFile = o.linkFile ?? defaultLinkFile();
@@ -29,6 +31,8 @@ export function createDriver(o = {}) {
   let connecting = null;
   let lastFailure = 0;
   let api = null;
+  const envRoots = (process.env.MMAB_PICK_ROOTS || '').split(':').filter(Boolean);
+  const pick = createFsPick({ roots: o.pickRoots ?? envRoots });
 
   function onEvent(conn, payloadText) {
     if (!api) return;
@@ -70,6 +74,9 @@ export function createDriver(o = {}) {
       'qwenwork.invoke': call('invoke', 'connection'),
       'qwenwork.send': call('send', 'connection'),
       'qwenwork.sendSync': call('sendSync', null),
+      // file.pick：网页版选择器的数据源，在驱动进程内完成，不经过千问主进程
+      'qwenwork.fs.list': (value) => pick.list(value),
+      'qwenwork.fs.describe': (value) => pick.describe(value),
     },
     onConnectionClosed(conn) {
       if (link && !link.closed) link.closeConnection(conn);

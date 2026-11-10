@@ -5,6 +5,7 @@
 //   require('electron') -> { contextBridge (same-world), ipcRenderer, webUtils }
 //   process             -> renderer-like object from the synchronous qwenwork.bootstrap call
 // Clipboard writes and external links act on THIS browser's computer, not on the Mac.
+// File / folder pickers run inside the page (qwen-picker.js) instead of the Mac's native dialog.
 (function (root) {
   'use strict';
   if (root.__mmabQwRequire) return;
@@ -55,6 +56,53 @@
     root.open(u, '_blank', 'noopener');
     return undefined;
   }
+  // ------------------------------------------------------------------ 原生对话框（tRPC）
+  // 这些 tRPC 调用在主进程弹 electron.dialog —— 面板出现在 Mac 屏幕上，远程页面看不到，请求会一直挂起。
+  // 选择文件 / 目录改走页内选择器（file.pick，qwen-picker.js）；保存类对话框暂不支持，立即报错而不是挂起。
+  var TRPC = 'trpc-electron';
+  var NATIVE_DIALOG_ONLY = {
+    'files.showSaveDialog': '另存为', 'files.saveAs': '另存为', 'files.saveImageAs': '保存图片',
+    'files.saveTextDocumentAs': '另存为', 'skills.selectSkillZip': '导入技能包',
+    'commonCliConnectors.selectPackage': '导入安装包',
+  };
+  function trpcAnswer(msg) {
+    root.setTimeout(function () { dispatch(TRPC, [msg]); }, 0); // 与真实 IPC 一样异步到达
+  }
+  function trpcData(id, data) {
+    trpcAnswer({ id: id, result: { type: 'data', data: { json: data } } }); // 应用使用 superjson：{json}
+  }
+  function trpcError(id, path, message) {
+    trpcAnswer({ id: id, error: { json: { message: message, code: -32603,
+      data: { code: 'INTERNAL_SERVER_ERROR', httpStatus: 500, path: path } } } });
+  }
+  function pickPaths(op) {
+    var input = (op.input && op.input.json) || {};
+    var picker = root.__mmabQwPicker;
+    if (!picker) return trpcData(op.id, { canceled: true, paths: [] });
+    picker.open({
+      type: input.type, title: input.title, defaultPath: input.defaultPath,
+      multiSelect: input.multiSelect !== false,
+      list: function (v) { return t.request('qwenwork.fs.list', v); },
+      describe: function (v) { return t.request('qwenwork.fs.describe', v); },
+    }).then(function (res) { trpcData(op.id, res); }, function () { trpcData(op.id, { canceled: true, paths: [] }); });
+  }
+  /** @returns {boolean} true = 已在页内处理，不再发往 Mac */
+  function interceptTrpc(msg) {
+    if (!msg || msg.method !== 'request' || !msg.operation || typeof msg.operation.path !== 'string') return false;
+    var op = msg.operation;
+    if (op.path === 'files.selectFilesAndFolders') {
+      pickPaths(op);
+      return true;
+    }
+    if (Object.prototype.hasOwnProperty.call(NATIVE_DIALOG_ONLY, op.path)) {
+      var what = NATIVE_DIALOG_ONLY[op.path];
+      if (root.__mmabQwPicker) root.__mmabQwPicker.toast('“' + what + '”需要 Mac 上的系统对话框，远程网页暂不支持。');
+      trpcError(op.id, op.path, '远程网页暂不支持“' + what + '”（需要 Mac 上的系统对话框）');
+      return true;
+    }
+    return false;
+  }
+
   var LOCAL = {
     'clipboard:write': function (e) { return copyLocal(pickText(e)); },
     'clipboard:write-rich-text': function (e, txt) { return copyLocal(pickText(typeof txt === 'string' ? txt : e)); },
@@ -89,6 +137,7 @@
     },
     send: function (ch) {
       var args = Array.prototype.slice.call(arguments, 1);
+      if (ch === TRPC && interceptTrpc(args[0])) return;
       t.request('qwenwork.send', { channel: String(ch), args: args }).catch(function (e) {
         console.warn('[mmab-qwen] send failed', ch, e && e.code);
       });

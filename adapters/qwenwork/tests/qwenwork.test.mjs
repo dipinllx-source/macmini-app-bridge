@@ -323,3 +323,106 @@ test('browser shim: Electron surface over the transport, local clipboard / links
   assert.equal(win.desktopApi.a, 1);
   assert.throws(() => win.__mmabQwRequire('fs'), /not available/);
 });
+
+test('file.pick: lists only inside the allowed root, hides dot entries, never follows links outside', async () => {
+  const { createFsPick } = await import('../driver/fs-pick.mjs');
+  const base = mkdtempSync(path.join(os.tmpdir(), 'mmab-pick-'));
+  try {
+    const root = path.join(base, 'home');
+    const outside = path.join(base, 'outside');
+    mkdirSync(path.join(root, 'proj', 'src'), { recursive: true });
+    mkdirSync(path.join(root, '.hidden'));
+    mkdirSync(outside);
+    writeFileSync(path.join(root, 'notes.txt'), 'abc');
+    const { symlinkSync, realpathSync } = await import('node:fs');
+    symlinkSync(outside, path.join(root, 'escape'));
+    symlinkSync(path.join(root, 'proj'), path.join(root, 'proj-link'));
+    const realRoot = realpathSync(root);
+    const pick = createFsPick({ roots: [root] });
+
+    const top = await pick.list({});
+    assert.equal(top.ok, true);
+    assert.equal(top.path, realRoot);
+    assert.equal(top.parent, null, 'no way up from the root');
+    assert.deepEqual(top.entries, [{ name: 'proj', type: 'folder' }, { name: 'proj-link', type: 'folder' }],
+      'folders only by default; dot entries and links leaving the root are hidden');
+    const withFiles = await pick.list({ path: root, files: true, hidden: true });
+    assert.deepEqual(withFiles.entries.map((e) => e.name), ['.hidden', 'proj', 'proj-link', 'notes.txt']);
+
+    const sub = await pick.list({ path: path.join(root, 'proj') });
+    assert.equal(sub.parent, realRoot);
+    assert.deepEqual(sub.entries, [{ name: 'src', type: 'folder' }]);
+
+    assert.equal((await pick.list({ path: outside })).reason, 'OUTSIDE_ROOT');
+    assert.equal((await pick.list({ path: path.join(root, 'escape') })).reason, 'OUTSIDE_ROOT', 'realpath first');
+    assert.equal((await pick.list({ path: path.join(root, '..') })).reason, 'OUTSIDE_ROOT');
+    assert.equal((await pick.list({ path: path.join(root, 'nope') })).reason, 'NOT_FOUND');
+    assert.equal((await pick.list({ path: path.join(root, 'notes.txt') })).reason, 'NOT_DIRECTORY');
+    assert.equal((await pick.list({ path: 'relative/x' })).reason, 'NOT_ABSOLUTE');
+
+    const d = await pick.describe({ paths: [path.join(root, 'proj'), path.join(root, 'notes.txt')] });
+    assert.deepEqual(d, { ok: true, paths: [
+      { path: path.join(realRoot, 'proj'), name: 'proj', type: 'folder', size: 0 },
+      { path: path.join(realRoot, 'notes.txt'), name: 'notes.txt', type: 'file', size: 3 },
+    ] });
+    assert.equal((await pick.describe({ paths: [path.join(root, 'escape')] })).reason, 'OUTSIDE_ROOT');
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('browser shim: native file dialogs never reach the Mac; folder picks are answered in the page', async () => {
+  const requests = [];
+  const pickerCalls = [];
+  const toasts = [];
+  const win = {
+    location: { pathname: '/', search: '', hash: '#windowId=main' },
+    history: { replaceState: () => {} },
+    navigator: { clipboard: { writeText: () => Promise.resolve() }, mediaDevices: {} },
+    crypto: globalThis.crypto,
+    setTimeout,
+    console,
+    MmabElectronCompat: globalThis.MmabElectronCompat,
+    __mmabQwPicker: {
+      open: (o) => {
+        pickerCalls.push(o);
+        return o.list({ path: '' }).then(() => ({ canceled: false, paths: [{ path: '/Users/u/proj', name: 'proj', type: 'folder', size: 0 }] }));
+      },
+      toast: (t) => toasts.push(t),
+    },
+    MmabTransport: {
+      create: () => ({
+        request: (op, value) => {
+          requests.push([op, value]);
+          return Promise.resolve(op === 'qwenwork.fs.list' ? { ok: true, path: '/Users/u', entries: [] } : null);
+        },
+        call: () => ({ platform: 'darwin', arch: 'arm64', argv: [], versions: {} }),
+      }),
+    },
+  };
+  win.globalThis = win;
+  vm.runInNewContext(readFileSync(new URL('../shim/qwen-electron.js', import.meta.url), 'utf8'), win);
+  const { ipcRenderer } = win.__mmabQwRequire('electron');
+  const replies = [];
+  ipcRenderer.on('trpc-electron', (_e, m) => replies.push(m));
+
+  ipcRenderer.send('trpc-electron', { method: 'request', operation: { id: 7, type: 'mutation',
+    path: 'files.selectFilesAndFolders', input: { json: { type: 'folders', multiSelect: false, allowCreateDirectory: true } } } });
+  ipcRenderer.send('trpc-electron', { method: 'request', operation: { id: 8, type: 'mutation',
+    path: 'files.showSaveDialog', input: { json: { title: 'x' } } } });
+  ipcRenderer.send('trpc-electron', { method: 'request', operation: { id: 9, type: 'query', path: 'localProjects.list' } });
+  await sleep(20);
+
+  assert.deepEqual(requests.map((r) => r[0]), ['qwenwork.fs.list', 'qwenwork.send'],
+    'only the ordinary query is forwarded to the Mac');
+  assert.equal(requests[1][1].args[0].operation.path, 'localProjects.list');
+  assert.equal(pickerCalls.length, 1);
+  assert.equal(pickerCalls[0].type, 'folders');
+  assert.equal(pickerCalls[0].multiSelect, false);
+  assert.deepEqual(JSON.parse(JSON.stringify(replies.find((m) => m.id === 7))), { id: 7, result: { type: 'data', data: { json: {
+    canceled: false, paths: [{ path: '/Users/u/proj', name: 'proj', type: 'folder', size: 0 }] } } } });
+  const err = replies.find((m) => m.id === 8);
+  assert.equal(err.error.json.data.path, 'files.showSaveDialog');
+  assert.match(err.error.json.message, /暂不支持/);
+  assert.equal(toasts.length, 1);
+});

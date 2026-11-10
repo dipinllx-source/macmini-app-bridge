@@ -13,6 +13,7 @@ public enum StandardCapability {
     STREAM_PUSH("stream.push", "宿主推送、流式结果"),
     FILE_UPLOAD("file.upload", "附件"),
     FILE_DROP("file.drop", "拖放"),
+    FILE_PICK("file.pick", "网页内选择本机文件 / 目录（替代原生对话框）"),
     CLIPBOARD_WRITE("clipboard.write", "剪贴板写"),
     CLIPBOARD_READ("clipboard.read", "剪贴板读"),
     MEDIA_VOICE("media.voice", "语音（需 HTTPS）"),
