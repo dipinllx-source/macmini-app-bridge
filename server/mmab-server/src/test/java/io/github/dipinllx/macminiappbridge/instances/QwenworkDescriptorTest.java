@@ -33,12 +33,11 @@ class QwenworkDescriptorTest {
         assertThat(d.gateSyncRequest("qwenwork.invoke")).as("invoke is not a sync operation").isPresent();
         assertThat(d.eventAllowed("qwenwork.ipc")).isTrue();
         assertThat(d.gateRequest("qwenwork.unknown")).contains(ErrorCode.UNKNOWN_OPERATION);
-        // file.pick（网页内目录选择器的数据源）尚无 live 证据：默认关闭，操作者授权验证窗口后开放
-        assertThat(d.gateRequest("qwenwork.fs.list")).isPresent();
-        assertThat(d.gateRequest("qwenwork.fs.describe")).isPresent();
-        AdapterDescriptor granted = d.withGrants(Set.of(StandardCapability.FILE_PICK));
-        assertThat(granted.gateRequest("qwenwork.fs.list")).isEmpty();
-        assertThat(granted.gateRequest("qwenwork.fs.describe")).isEmpty();
+        // file.pick（网页内打开 / 另存为选择器）：2026-11-10 正式实例 live 证据，无需授权
+        for (String op : new String[] {"qwenwork.fs.list", "qwenwork.fs.describe", "qwenwork.fs.checkSave", "qwenwork.dialog.answer"}) {
+            assertThat(d.gateRequest(op)).as(op).isEmpty();
+        }
+        assertThatThrownBy(() -> d.withGrants(Set.of(StandardCapability.FILE_PICK))).isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> d.withGrants(Set.of(StandardCapability.UI_RENDER)))
                 .as("nothing left to grant once live evidence exists").isInstanceOf(IllegalArgumentException.class);
     }

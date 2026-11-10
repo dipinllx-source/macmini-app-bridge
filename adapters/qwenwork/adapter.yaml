@@ -59,5 +59,6 @@ web:
 evidence:
   ui.render: live      # 2026-11-09 正式实例：原版界面、desktopApi / electronTRPC、47 个按钮、输入框，0 未处理异常
   ui.history: live     # 2026-11-09 正式实例：打开历史会话，消息列表加载
+  file.pick: live      # 2026-11-10 正式实例：创建项目选目录、另存为、导入技能包、保存图片（应用真实写入所选路径），Mac 端无原生对话框
 resources:
   source: extract-from-app-bundle

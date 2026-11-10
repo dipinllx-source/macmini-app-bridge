@@ -64,3 +64,17 @@
 | 应用自身的 Statsig 外网请求失败（1 条 console.error） | 已知、非阻断 | 原型同样存在；未放宽 CSP |
 | 历史会话、发消息、Git 操作 | **未验证** | 需操作者授权 |
 | 独立 profile 是否隔离账号 | **否（实测）** | 全新 profile 启动即为已登录状态 |
+
+## 2026-11-10 · file.pick（原生对话框转网页）正式实例验收
+
+经平台（headless Chrome → 8443 登录 → 票据 → 8444 qwen-01，payload 重新注入 PID 82644，适配器 0.5.0）：
+
+| 场景 | 结果 |
+| --- | --- |
+| 创建项目 → 选择文件夹（页内处理） | 选择器列出 Mac 主目录，选中目录后回填“工作目录”，取消未创建项目 |
+| `files.showSaveDialog`（payload 转网页） | 页内另存为选择器，默认 ~/Downloads + 原文件名，返回所选路径 |
+| `skills.selectSkillZip`（payload 转网页） | 按 zip 过滤，返回所选文件，未导入 |
+| `files.saveImageAs`（payload 转网页） | 应用自己把图片写入所选目录（70 字节 PNG） |
+| 越界路径 / 非被询问连接作答 / 覆盖目录 | 驱动或 payload 拒绝（离线测试） |
+
+未逐一实测：`commonCliConnectors.selectPackage`、`files.saveAs`、`saveTextDocumentAs`（同一 showOpen/SaveDialog 钩子）。
