@@ -12,6 +12,7 @@ app:
   bundleId: cn.qwenwork.desktop.mac
   executableAllowlist: [/Applications/QwenWorkCN.app/Contents/MacOS/QwenWorkCN]
   versionSource: Info.plist
+  icon: Contents/Resources/icon.icns           # 控制台头像：运行时从本机安装包转换，不入库
 permissions:
   launchArguments: true      # 需以 --inspect=127.0.0.1:9229 启动；适配器与注入工具都不会重启应用
   temporaryInspector: true   # tools/inject.mjs 注入后立即关闭

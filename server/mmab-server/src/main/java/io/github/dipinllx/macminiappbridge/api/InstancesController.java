@@ -82,6 +82,26 @@ public class InstancesController {
         return describe(require(id), s);
     }
 
+    private io.github.dipinllx.macminiappbridge.instances.AppIcons icons;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setIcons(io.github.dipinllx.macminiappbridge.instances.AppIcons icons) {
+        this.icons = icons;
+    }
+
+    /** 控制台头像：本机应用自身的图标（运行时转换，不入库）；没有时 404，控制台用内置图标。 */
+    @GetMapping("/instances/{id}/icon")
+    public org.springframework.http.ResponseEntity<byte[]> icon(@PathVariable String id, ServerWebExchange ex) {
+        Requests.consoleSession(ex);
+        InstanceRuntime rt = require(id);
+        return (icons == null ? java.util.Optional.<byte[]>empty() : icons.png(rt.config().appId()))
+                .map(b -> org.springframework.http.ResponseEntity.ok()
+                        .contentType(org.springframework.http.MediaType.IMAGE_PNG)
+                        .cacheControl(org.springframework.http.CacheControl.maxAge(java.time.Duration.ofHours(12)).cachePrivate())
+                        .body(b))
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
+    }
+
     @PostMapping("/instances/{id}/leases")
     public ResponseEntity<Map<String, Object>> acquire(@PathVariable String id, ServerWebExchange ex) {
         ConsoleSession s = Requests.consoleSession(ex);

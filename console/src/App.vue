@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DexIcon from './components/DexIcon.vue'
 import { onMounted, ref } from 'vue'
 import { fetchHealth, type PlatformHealth } from './api/health'
 import { useSession } from './composables/useSession'
@@ -10,10 +11,10 @@ const busy = ref(false)
 const shake = ref(false)
 
 const nav = [
-  { to: '/', label: '应用总览', icon: '🏠' },
-  { to: '/lifecycle', label: '生命周期', icon: '🔁' },
-  { to: '/compatibility', label: '版本兼容', icon: '🧬' },
-  { to: '/security', label: '安全与审计', icon: '🛡️' },
+  { to: '/', label: '应用总览', icon: 'home' },
+  { to: '/lifecycle', label: '生命周期', icon: 'cycle' },
+  { to: '/compatibility', label: '版本兼容', icon: 'layers' },
+  { to: '/security', label: '安全与审计', icon: 'shield' },
 ]
 
 onMounted(async () => {
@@ -83,7 +84,7 @@ async function submit() {
     <main v-else-if="loggedIn" class="body">
       <nav class="tabs">
         <router-link v-for="n in nav" :key="n.to" :to="n.to" class="tab" active-class="" exact-active-class="active">
-          <span class="tab-icon">{{ n.icon }}</span>{{ n.label }}
+          <DexIcon class="tab-icon" :name="n.icon" :size="21" />{{ n.label }}
         </router-link>
       </nav>
       <section class="screen">
@@ -143,7 +144,7 @@ async function submit() {
 }
 .tab:hover { transform: translateY(-2px); }
 .tab.active { background: var(--dex-red); color: #fff; }
-.tab-icon { font-size: 15px; }
+.tab-icon { color: inherit; }
 
 .login-wrap { display: grid; place-items: center; padding: 60px 16px; }
 .login { width: min(420px, 100%); padding: 28px 28px 22px; text-align: center; }

@@ -10,6 +10,7 @@ app:
   bundleId: com.openai.codex
   executableAllowlist: [/Applications/ChatGPT.app/Contents/MacOS/ChatGPT]
   versionSource: Info.plist
+  icon: Contents/Resources/app.icns           # 控制台头像：运行时从本机安装包转换，不入库
 permissions:
   launchArguments: true      # 专用实例：独立 --user-data-dir + --remote-debugging-port（只绑 127.0.0.1）
   temporaryInspector: false  # 应用禁止主进程调试

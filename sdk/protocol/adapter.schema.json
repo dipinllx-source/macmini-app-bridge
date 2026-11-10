@@ -85,6 +85,11 @@
             "package.json",
             "custom"
           ]
+        },
+        "icon": {
+          "type": "string",
+          "pattern": "^Contents/Resources/[A-Za-z0-9._-]{1,64}\\.icns$",
+          "description": "Optional app icon inside the bundle of the first executableAllowlist entry; rendered by the console (converted locally, never committed)."
         }
       }
     },

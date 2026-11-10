@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DexIcon from '../components/DexIcon.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { listAudit, listInstances, openInstance, type ApiError, type AuditRow, type LiveInstance } from '../api/bridge'
 import { describeError, useSession } from '../composables/useSession'
@@ -9,13 +10,14 @@ const events = ref<AuditRow[]>([])
 const loaded = ref(false)
 const toast = ref<{ text: string; kind: 'ok' | 'err' } | null>(null)
 const opening = ref<string | null>(null)
+const iconFailed = ref<Record<string, boolean>>({})
 let timer: number | undefined
 
 // ------------------------------------------------------------------ 每个应用的“图鉴资料”
-const PROFILE: Record<string, { emoji: string; color: string; tagline: string }> = {
-  qwenwork: { emoji: '🌀', color: '#8b7cf6', tagline: '千问办公 · 主进程注入' },
-  codex: { emoji: '⚡', color: '#f5b400', tagline: 'Codex · 页面进程调试接口' },
-  mock: { emoji: '🧪', color: '#9aa0a6', tagline: '离线测试用的小家伙' },
+const PROFILE: Record<string, { fallback: string; color: string; tagline: string }> = {
+  qwenwork: { fallback: 'app', color: '#8b7cf6', tagline: '千问办公 · 主进程注入' },
+  codex: { fallback: 'app', color: '#f5b400', tagline: 'Codex · 页面进程调试接口' },
+  mock: { fallback: 'flask', color: '#9aa0a6', tagline: '离线测试用的小家伙' },
 }
 const TYPES: Record<string, { label: string; cls: string }> = {
   'electron-main-inject': { label: '注入系', cls: 'inject' },
@@ -30,7 +32,7 @@ const CAP_LABEL: Record<string, string> = {
 }
 
 function profile(i: LiveInstance) {
-  return PROFILE[i.appId] ?? { emoji: '❔', color: '#68a090', tagline: i.appId }
+  return PROFILE[i.appId] ?? { fallback: 'app', color: '#68a090', tagline: i.appId }
 }
 function type(i: LiveInstance) {
   return TYPES[i.strategy] ?? { label: '未知系', cls: 'unknown' }
@@ -85,18 +87,18 @@ function who(id: string) {
 function storyOf(e: AuditRow): { icon: string; text: string } | null {
   const app = who(e.instance)
   switch (e.action) {
-    case 'transport.open': return e.result === 'OK' ? { icon: '✨', text: `${app} 被召唤出场` } : { icon: '🚧', text: `${app} 已在别处出战，未能召唤` }
-    case 'transport.resume': return { icon: '💚', text: `${app} 断线后满血归来（无损恢复）` }
-    case 'transport.suspend': return { icon: '💤', text: `${app} 暂时离场，等待归来` }
+    case 'transport.open': return e.result === 'OK' ? { icon: 'spark', text: `${app} 被召唤出场` } : { icon: 'alert', text: `${app} 已在别处出战，未能召唤` }
+    case 'transport.resume': return { icon: 'revive', text: `${app} 断线后满血归来（无损恢复）` }
+    case 'transport.suspend': return { icon: 'pause', text: `${app} 暂时离场，等待归来` }
     case 'transport.close':
-      if (e.result === 'OK') return /RESUME_EXPIRED/.test(e.detail) ? { icon: '🌙', text: `${app} 等太久，先回去休息了` } : { icon: '👋', text: `${app} 收工离场` }
-      return { icon: '⚠️', text: `${app} 被迫离场（${e.result}）` }
-    case 'ticket.exchange': return e.result === 'OK' ? { icon: '🚪', text: `为 ${app} 打开了一扇新窗口` } : null
-    case 'auth.login': return e.result === 'OK' ? { icon: '🎒', text: '训练家登录' } : { icon: '🔒', text: '有人尝试登录但口令不对' }
-    case 'auth.logout': return { icon: '🏁', text: '训练家离开' }
-    case 'auth.revoke-all': return e.result === 'OK' ? { icon: '🧹', text: '注销了所有会话' } : null
-    case 'adapter.start': return { icon: '🔌', text: `${app} 的适配器准备就绪` }
-    case 'instance.generation': return { icon: '🔄', text: `${app} 重新进化（适配器重启）` }
+      if (e.result === 'OK') return /RESUME_EXPIRED/.test(e.detail) ? { icon: 'moon', text: `${app} 等太久，先回去休息了` } : { icon: 'exit', text: `${app} 收工离场` }
+      return { icon: 'alert', text: `${app} 被迫离场（${e.result}）` }
+    case 'ticket.exchange': return e.result === 'OK' ? { icon: 'door', text: `为 ${app} 打开了一扇新窗口` } : null
+    case 'auth.login': return e.result === 'OK' ? { icon: 'key', text: '训练家登录' } : { icon: 'lock', text: '有人尝试登录但口令不对' }
+    case 'auth.logout': return { icon: 'flag', text: '训练家离开' }
+    case 'auth.revoke-all': return e.result === 'OK' ? { icon: 'broom', text: '注销了所有会话' } : null
+    case 'adapter.start': return { icon: 'plug', text: `${app} 的适配器准备就绪` }
+    case 'instance.generation': return { icon: 'evolve', text: `${app} 重新进化（适配器重启）` }
     default: return null
   }
 }
@@ -156,15 +158,15 @@ onUnmounted(() => {
     <!-- 徽章栏 -->
     <div class="badges">
       <div class="badge dex-card pop-in">
-        <div class="b-icon">🏅</div>
+        <div class="b-icon medal"><DexIcon name="medal" :size="30" /></div>
         <div><div class="b-num">{{ ready }}/{{ enabled.length }}</div><div class="b-label">健康应用（精神饱满）</div></div>
       </div>
       <div class="badge dex-card pop-in" style="animation-delay: 60ms">
-        <div class="b-icon">⚔️</div>
+        <div class="b-icon play"><DexIcon name="play" :size="30" /></div>
         <div><div class="b-num">{{ inBattle }}</div><div class="b-label">运行中的页面（出战中）</div></div>
       </div>
       <div class="badge dex-card pop-in" style="animation-delay: 120ms">
-        <div class="b-icon">💚</div>
+        <div class="b-icon heart"><DexIcon name="heart" :size="30" /></div>
         <div><div class="b-num">{{ recovered }} 次</div><div class="b-label">断线后无损恢复</div></div>
       </div>
     </div>
@@ -179,7 +181,9 @@ onUnmounted(() => {
           :class="{ off: !i.enabled }" :style="{ animationDelay: `${idx * 80}ms`, '--accent': profile(i).color }">
           <div class="card-head">
             <div class="avatar" :class="{ sleepy: i.state !== 'READY' }">
-              <span>{{ profile(i).emoji }}</span>
+              <img v-if="!iconFailed[i.id]" :src="`/__mmab/api/v1/instances/${encodeURIComponent(i.id)}/icon`"
+                :alt="i.displayName" draggable="false" @error="iconFailed[i.id] = true" />
+              <DexIcon v-else class="fallback-icon" :name="profile(i).fallback" :size="48" />
             </div>
             <div class="title">
               <div class="name-row">
@@ -219,10 +223,10 @@ onUnmounted(() => {
 
       <!-- 冒险日志 -->
       <aside class="log dex-card pop-in" style="animation-delay: 160ms">
-        <h3 class="dex-title">📜 冒险日志</h3>
+        <h3 class="dex-title"><DexIcon name="scroll" :size="20" /> 冒险日志</h3>
         <ul v-if="story.length">
           <li v-for="x in story" :key="x.e.seq">
-            <span class="ico">{{ x.s!.icon }}</span>
+            <span class="ico" :class="x.s!.icon"><DexIcon :name="x.s!.icon" :size="19" /></span>
             <span class="txt">{{ x.s!.text }}</span>
             <time>{{ when(x.e.at) }}</time>
           </li>
@@ -237,7 +241,17 @@ onUnmounted(() => {
 <style scoped>
 .badges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
 .badge { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
-.b-icon { font-size: 28px; animation: floaty 3.2s ease-in-out infinite; }
+.b-icon {
+  width: 46px; height: 46px; flex: none; display: grid; place-items: center; border-radius: 14px;
+  border: 3px solid var(--dex-line); color: var(--dex-ink); animation: floaty 3.2s ease-in-out infinite;
+}
+.b-icon.medal { background: #fff3c4; }
+.b-icon.play { background: #ffe1d9; }
+.b-icon.heart { background: #e3fbe7; }
+.log h3 { display: flex; align-items: center; gap: 6px; }
+.ico { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px; background: #f1f2f7; color: var(--dex-ink); }
+.ico.revive { background: #e3fbe7; } .ico.alert, .ico.lock { background: #ffe1d9; } .ico.spark, .ico.key, .ico.door { background: #fff3c4; }
+.ico.moon, .ico.pause { background: #e3f1ff; }
 .b-num { font-size: 24px; font-weight: 900; line-height: 1; }
 .b-label { font-size: 12px; color: var(--dex-ink-soft); font-weight: 700; margin-top: 3px; }
 
@@ -257,11 +271,13 @@ onUnmounted(() => {
 .app-card.off { filter: saturate(0.3); opacity: 0.75; }
 .card-head { display: flex; gap: 14px; align-items: center; position: relative; }
 .avatar {
-  width: 64px; height: 64px; flex: none; border-radius: 50%; display: grid; place-items: center;
-  font-size: 34px; background: #fff; border: 3px solid var(--dex-line);
-  box-shadow: inset 0 -6px 0 rgba(0,0,0,0.06), 0 0 0 4px var(--accent);
+  width: 68px; height: 68px; flex: none; border-radius: 22px; display: grid; place-items: center;
+  background: #fff; border: 3px solid var(--dex-line); overflow: hidden; color: var(--dex-ink);
+  box-shadow: 0 0 0 4px var(--accent);
   animation: floaty 3s ease-in-out infinite;
 }
+.avatar:has(.fallback-icon) { background: #eef6ff; }
+.avatar img { width: 64px; height: 64px; object-fit: contain; -webkit-user-drag: none; image-rendering: auto; }
 .avatar.sleepy { animation-duration: 6s; filter: grayscale(0.4); }
 .title { min-width: 0; }
 .name-row { display: flex; align-items: baseline; gap: 8px; }
@@ -284,7 +300,7 @@ onUnmounted(() => {
 .log { padding: 16px 16px 12px; position: sticky; top: 14px; }
 .log h3 { margin: 0 0 10px; font-size: 16px; }
 .log ul { list-style: none; margin: 0 0 8px; padding: 0; }
-.log li { display: grid; grid-template-columns: 22px 1fr 44px; gap: 6px; align-items: baseline; padding: 7px 0; border-bottom: 2px dashed #eceaf0; font-size: 13px; }
+.log li { display: grid; grid-template-columns: 28px 1fr 44px; gap: 6px; align-items: baseline; padding: 7px 0; border-bottom: 2px dashed #eceaf0; font-size: 13px; }
 .log li:last-child { border-bottom: none; }
 .log time { text-align: right; font-size: 11px; color: var(--dex-ink-soft); font-variant-numeric: tabular-nums; }
 .quiet { color: var(--dex-ink-soft); font-size: 13px; }

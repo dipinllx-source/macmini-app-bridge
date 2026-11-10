@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DexIcon from '../components/DexIcon.vue'
 import { onMounted, ref } from 'vue'
 import { ElMessageBox } from 'element-plus'
 import { listAudit, revokeAll, type ApiError, type AuditRow } from '../api/bridge'
@@ -66,10 +67,10 @@ onMounted(() => load())
   <div class="sec">
     <div class="dex-card intro">
       <div>
-        <h3 class="dex-title">🛡️ 安全与审计</h3>
+        <h3 class="dex-title"><DexIcon name="shield" :size="22" /> 安全与审计</h3>
         <p>审计只记录元数据：谁、何时、对哪个应用、做了什么、结果如何。不记录消息内容、口令、Cookie 或票据，默认保留 30 天。</p>
       </div>
-      <button class="go-btn danger" @click="doRevokeAll">🧹 注销所有会话</button>
+      <button class="go-btn danger" @click="doRevokeAll"><DexIcon name="broom" :size="16" /> 注销所有会话</button>
     </div>
     <p v-if="msg" class="err">{{ msg }}</p>
 
@@ -108,7 +109,8 @@ onMounted(() => load())
 
 <style scoped>
 .intro { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 14px 18px; margin-bottom: 14px; }
-.intro h3 { margin: 0 0 4px; }
+.intro h3 { margin: 0 0 4px; display: flex; align-items: center; gap: 6px; }
+.danger { display: inline-flex; align-items: center; gap: 6px; }
 .intro p { margin: 0; font-size: 13px; color: var(--dex-ink-soft); }
 .danger { background: var(--dex-red); color: #fff; white-space: nowrap; }
 .err { color: var(--dex-red); font-weight: 700; }

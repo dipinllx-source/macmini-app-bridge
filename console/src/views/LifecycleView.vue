@@ -1,11 +1,12 @@
 <script setup lang="ts">
+import DexIcon from '../components/DexIcon.vue'
 import { useInstancesStore } from '../stores/instances'
 
 const store = useInstancesStore()
 </script>
 
 <template>
-  <div class="dex-card sample">🚧 示例数据：这一页将在“控制台真实状态”任务中接入真实数据。</div>
+  <div class="dex-card sample"><DexIcon name="alert" :size="16" /> 示例数据：这一页将在“控制台真实状态”任务中接入真实数据。</div>
   <el-table :data="store.items" size="small">
     <el-table-column prop="id" label="实例" />
     <el-table-column prop="desiredState" label="期望状态" />
