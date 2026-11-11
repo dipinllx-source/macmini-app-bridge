@@ -43,7 +43,7 @@
     sendClose: function (port) { try { t.sendPortClose(port); } catch (e) { /* closed */ } },
   });
 
-  var initial = t.call('codex.bootstrap', null);
+  var initial = T.bootstrapOrWait(t, 'codex.bootstrap', null, ' Codex');
   var theme = initial.getSystemThemeVariant;
 
   function swallow(op) {
@@ -57,7 +57,7 @@
   });
   root.codexWindowType = 'electron';
 
-  var bridge = { windowType: 'electron' };
+  var bridge = { windowType: 'electron', usesStagingWidgetSandbox: false };
   Object.keys(initial).forEach(function (k) {
     var v = initial[k];
     bridge[k] = function () { return v; };

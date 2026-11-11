@@ -409,5 +409,38 @@
     };
   }
 
-  root.MmabTransport = Object.freeze({ create, banner, BridgeError });
+  /**
+   * 启动引导（同步调用）。失败时不再让页面静默白屏：显示原因，并每 10 秒在后台重试同一调用，成功即整页刷新。
+   * 典型场景：本地应用刚升级 / 重启，适配器连不上应用（ADAPTER_UNAVAILABLE），或版本未适配（BLOCKED_UPGRADE）。
+   * @returns {*} 引导结果；失败时抛出原错误（调用方的 shim 随之停止，原版脚本不会在缺桥的情况下运行）
+   */
+  function bootstrapOrWait(t, op, value, appName) {
+    try {
+      return t.call(op, value);
+    } catch (err) {
+      const code = (err && err.code) || 'UNKNOWN';
+      const name = appName || '应用';
+      let text;
+      if (code === 'HTTP_401') text = closeMessage(1008, 'UNAUTHENTICATED');
+      else if (code === 'HTTP_409') text = closeMessage(1013, 'LEASE_OCCUPIED');
+      else if (code === 'BLOCKED_UPGRADE' || code === 'COMPATIBILITY_BLOCKED') {
+        text = `macmini App 引桥：本机${name}已升级，平台尚未适配（${code}）。适配完成后本页会自动刷新。`;
+      } else {
+        text = `macmini App 引桥：暂时连不上本机${name}（${code}）。常见原因是应用刚升级或重启；恢复后本页会自动刷新。`;
+      }
+      banner(text);
+      if (code !== 'HTTP_401' && code !== 'HTTP_409') {
+        const timer = setInterval(() => {
+          try {
+            t.call(op, value);
+            clearInterval(timer);
+            location.reload();
+          } catch (e) { /* still unavailable */ }
+        }, 10000);
+      }
+      throw err;
+    }
+  }
+
+  root.MmabTransport = Object.freeze({ create, banner, bootstrapOrWait, BridgeError });
 })(globalThis);

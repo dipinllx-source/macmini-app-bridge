@@ -241,6 +241,7 @@ test('browser shim: electronBridge surface, app-host handoff through the relay, 
     setTimeout: () => 0, console, MessageChannel, MessagePort,
     MmabCodec: globalThis.MmabCodec, MmabPorts: globalThis.MmabPorts,
     MmabTransport: {
+      bootstrapOrWait: (t, op, v) => t.call(op, v),
       banner() {},
       create: (opts) => {
         o = opts;

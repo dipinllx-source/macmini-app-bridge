@@ -298,6 +298,7 @@ test('browser shim: Electron surface over the transport, local clipboard / links
     console,
     MmabElectronCompat: globalThis.MmabElectronCompat,
     MmabTransport: {
+      bootstrapOrWait: (t, op, v) => t.call(op, v),
       create: (o) => {
         onEvent = o.onEvent;
         return {
@@ -406,6 +407,7 @@ test('browser shim: folder picks are answered in the page; forwarded native dial
       toast: (t) => toasts.push(t),
     },
     MmabTransport: {
+      bootstrapOrWait: (t, op, v) => t.call(op, v),
       create: (o) => ({
         _: (onEvent = o.onEvent),
         request: (op, value) => {
@@ -529,5 +531,47 @@ test('payload: dialogs started by a browser connection go to that page; the Mac 
   } finally {
     await s.done();
     rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test('events over the 1 MiB frame limit arrive as ordered parts and are reassembled by the shim', async () => {
+  const s = await setup();
+  try {
+    const big = '会话'.repeat(400 * 1024) + '"\\end'; // ~2.4 MB of UTF-8, plus characters JSON escapes
+    s.fx.electron.ipcMain.handle('big:x', (ev) => { ev.reply('big:data', { text: big }); return 1; });
+    const r = decode((await s.call('c-1', 'qwenwork.invoke', { channel: 'big:x', args: [] })).payload);
+    assert.equal(r.ok, true);
+    const parts = [];
+    for (;;) {
+      const e = await s.waitFor((f) => f.messageKind === 'EVENT' && f.operation === 'qwenwork.ipc.part', 3000);
+      if (!e) break;
+      assert.equal(e.connectionId, 'c-1');
+      assert.ok(Buffer.byteLength(e.payload, 'utf8') < 1024 * 1024, 'every part fits one frame');
+      parts.push(decode(e.payload));
+      if (parts.length === parts[0].n) break;
+    }
+    assert.ok(parts.length >= 3);
+    assert.deepEqual(parts.map((p) => p.i), [...parts.keys()]);
+    assert.equal(await s.waitFor((f) => f.messageKind === 'CONTROL', 300), undefined, 'the connection is not closed');
+
+    // the browser shim puts them back together and dispatches the original IPC event once
+    let onEvent;
+    const win = {
+      location: { pathname: '/', search: '', hash: '#windowId=main' }, history: { replaceState: () => {} },
+      navigator: { clipboard: { writeText: () => Promise.resolve() }, mediaDevices: {} }, crypto: globalThis.crypto,
+      setTimeout, console, MmabElectronCompat: globalThis.MmabElectronCompat, MmabCodec: globalThis.MmabCodec,
+      MmabTransport: {
+      bootstrapOrWait: (t, op, v) => t.call(op, v), create: (o) => { onEvent = o.onEvent; return { request: () => Promise.resolve(null), call: () => ({ platform: 'darwin', arch: 'arm64', argv: [], versions: {} }) }; } },
+    };
+    win.globalThis = win;
+    vm.runInNewContext(readFileSync(new URL('../shim/qwen-electron.js', import.meta.url), 'utf8'), win);
+    const got = [];
+    win.__mmabQwRequire('electron').ipcRenderer.on('big:data', (_e, v) => got.push(v.text));
+    onEvent('qwenwork.ipc.part', parts[1]); // a group that starts mid-way is ignored
+    for (const p of parts) onEvent('qwenwork.ipc.part', p);
+    assert.equal(got.length, 1);
+    assert.equal(got[0], big);
+  } finally {
+    await s.done();
   }
 });

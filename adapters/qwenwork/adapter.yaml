@@ -44,6 +44,7 @@ operations:
   qwenwork.send: { capability: ui.render, kind: request }
   qwenwork.sendSync: { capability: ui.render, kind: request, sync: true }
   qwenwork.ipc: { capability: ui.render, kind: event }
+  qwenwork.ipc.part: { capability: ui.render, kind: event }   # 超过单帧上限的 qwenwork.ipc 分片（shim 拼回）
   qwenwork.fs.list: { capability: file.pick, kind: request }
   qwenwork.fs.describe: { capability: file.pick, kind: request }
   qwenwork.fs.checkSave: { capability: file.pick, kind: request }

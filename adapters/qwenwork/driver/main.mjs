@@ -9,6 +9,7 @@
 import { realpathSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { runAdapter } from '../../../sdk/driver-node/adapter-runtime.mjs';
+import { MAX_FRAME_BYTES } from '../../../sdk/driver-node/wire.mjs';
 import { LinkError, connectLink } from './link-client.mjs';
 import { decode, encode } from '../../../sdk/web/codec.mjs';
 import { createFsPick } from './fs-pick.mjs';
@@ -16,6 +17,11 @@ import { defaultLinkFile, readHandoff, verifyHandoff } from './process-check.mjs
 
 export const ADAPTER_VERSION = '0.5.0';
 const RETRY_MS = 2000;
+// 单帧上限 1MiB；千问的 tRPC 回包（例如打开一段很长的会话）可能更大。超过的事件拆成 qwenwork.ipc.part 分片，
+// 由网页 shim 按序拼回；每片 ≤ 256K 字符（payload 是 JSON 文本，UTF-8 最坏 3 字节/字符 ≈ 768KB）。
+export const PART_CHARS = 256 * 1024;
+export const MAX_CHUNKED_BYTES = 24 * 1024 * 1024; // 再大就按原规则只关这一条浏览器连接（平台出站预算 32MiB）
+const DIRECT_LIMIT = MAX_FRAME_BYTES - 4096;
 
 /**
  * @param {object} o
@@ -35,10 +41,25 @@ export function createDriver(o = {}) {
   const envRoots = (process.env.MMAB_PICK_ROOTS || '').split(':').filter(Boolean);
   const pick = createFsPick({ roots: o.pickRoots ?? envRoots });
 
+  let partSeq = 0;
+  function emitTo(c, payloadText, bytes) {
+    if (bytes <= DIRECT_LIMIT || bytes > MAX_CHUNKED_BYTES) {
+      api.emit(c, 'qwenwork.ipc', payloadText, { raw: true }); // 过大者由运行时只关闭这一条连接（并记录大小）
+      return;
+    }
+    const id = ++partSeq;
+    const n = Math.ceil(payloadText.length / PART_CHARS);
+    for (let i = 0; i < n; i++) {
+      api.emit(c, 'qwenwork.ipc.part', encode({ id, i, n, d: payloadText.slice(i * PART_CHARS, (i + 1) * PART_CHARS) }),
+        { raw: true });
+    }
+    process.stderr.write(`[mmab-adapter] chunked event payloadBytes=${bytes} parts=${n} connection=${c}\n`);
+  }
   function onEvent(conn, payloadText) {
     if (!api) return;
+    const bytes = Buffer.byteLength(payloadText, 'utf8');
     const targets = conn === null ? api.connections() : [conn];
-    for (const c of targets) api.emit(c, 'qwenwork.ipc', payloadText, { raw: true });
+    for (const c of targets) emitTo(c, payloadText, bytes);
   }
 
   async function ensureLink() {

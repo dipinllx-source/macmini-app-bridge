@@ -294,7 +294,13 @@ public final class ProcessAdapterClient implements AutoCloseable {
         try {
             String line;
             while ((line = r.readLine(16 * 1024)) != null) {
-                log.debug("[adapter {} {}] {}", instanceId, name, line.length() > 300 ? line.substring(0, 300) : line);
+                String shown = line.length() > 300 ? line.substring(0, 300) : line;
+                // SDK 运行时的诊断行（只含大小 / 连接号，不含内容）进 INFO，便于排查断线；其余适配器输出仍为 DEBUG
+                if (line.startsWith("[mmab-adapter]")) {
+                    log.info("[adapter {} {}] {}", instanceId, name, shown);
+                } else {
+                    log.debug("[adapter {} {}] {}", instanceId, name, shown);
+                }
             }
         } catch (IOException | RuntimeException ignored) {
             // 进程结束

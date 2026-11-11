@@ -359,3 +359,33 @@ test('disconnect diagnostics: close / unload / next-load beacons carry metadata 
   assert.equal(load.prev.e, 'unload');
   assert.equal(store.has('__mmab_last_unload'), false);
 });
+
+test('bootstrapOrWait: a failed startup shows the reason and reloads once the app is reachable again', async () => {
+  const { readFileSync } = await import('node:fs');
+  const vmod = await import('node:vm');
+  const timers = [];
+  let reloaded = 0;
+  const els = new Map();
+  const doc = {
+    readyState: 'complete', body: { appendChild: (el) => els.set(el.id, el) }, documentElement: null,
+    getElementById: (id) => els.get(id) || null,
+    createElement: () => ({ style: {}, setAttribute() {}, appendChild() {}, addEventListener() {} }),
+    addEventListener() {},
+  };
+  const win = { document: doc, location: { reload: () => { reloaded++; } }, setInterval: (fn) => { timers.push(fn); return 1; },
+    clearInterval: () => { timers.length = 0; }, console };
+  win.globalThis = win;
+  vmod.runInNewContext(readFileSync(new URL('./codec.js', import.meta.url), 'utf8'), win);
+  vmod.runInNewContext(readFileSync(new URL('./transport.js', import.meta.url), 'utf8'), win);
+  const T = win.MmabTransport;
+  let up = false;
+  const fake = { call: () => { if (!up) throw new T.BridgeError('ADAPTER_UNAVAILABLE'); return { ok: 1 }; } };
+  assert.throws(() => T.bootstrapOrWait(fake, 'x.bootstrap', null, ' Codex'), /ADAPTER_UNAVAILABLE/);
+  assert.match(els.get('__mmab_banner').textContent, /暂时连不上本机 Codex（ADAPTER_UNAVAILABLE）.*自动刷新/);
+  timers[0]();
+  assert.equal(reloaded, 0, 'still down: no reload');
+  up = true;
+  timers[0]();
+  assert.equal(reloaded, 1, 'reachable again: one reload');
+  assert.deepEqual(T.bootstrapOrWait(fake, 'x.bootstrap', null), { ok: 1 });
+});

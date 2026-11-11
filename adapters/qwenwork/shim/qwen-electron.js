@@ -33,16 +33,39 @@
     });
   }
 
+  // 超过单帧上限的事件由驱动拆成 qwenwork.ipc.part {id, i, n, d}，同一连接上按序到达；拼齐后按 qwenwork.ipc 处理
+  var parts = null; // {id, n, got: string[]}
+  function onPart(v) {
+    if (!v || typeof v.id !== 'number' || typeof v.i !== 'number' || typeof v.n !== 'number' || typeof v.d !== 'string') return null;
+    if (!parts || parts.id !== v.id) {
+      if (v.i !== 0) return null; // 缺了开头（例如重连）：整组丢弃
+      parts = { id: v.id, n: v.n, got: [] };
+    }
+    if (v.i !== parts.got.length) { parts = null; return null; }
+    parts.got.push(v.d);
+    if (parts.got.length < parts.n) return null;
+    var text = parts.got.join('');
+    parts = null;
+    try { return root.MmabCodec.decode(text); } catch (e) {
+      console.error('[mmab-qwen] chunked event could not be decoded', e && e.code);
+      return null;
+    }
+  }
+  function onIpc(value) {
+    if (!value || typeof value.channel !== 'string' || !Array.isArray(value.args)) return;
+    if (value.channel === 'mmab:dialog') return onNativeDialog(value.args[0]);
+    if (value.channel === 'mmab:dialog-cancel') return onNativeDialogCancel(value.args[0]);
+    dispatch(value.channel, value.args);
+  }
+
   var t = transport.create({
     // disconnect diagnostics remember recent IPC channel names (never arguments)
     label: function (op, value) { return value && typeof value.channel === 'string' ? value.channel : op; },
     // 连接未能无损恢复（超过宽限期 / 平台重启）：原版页面持有的订阅与端口已失效，受控地整页重新加载
     onLost: function () { root.location.reload(); },
     onEvent: function (op, value) {
-      if (op !== 'qwenwork.ipc' || !value || typeof value.channel !== 'string' || !Array.isArray(value.args)) return;
-      if (value.channel === 'mmab:dialog') return onNativeDialog(value.args[0]);
-      if (value.channel === 'mmab:dialog-cancel') return onNativeDialogCancel(value.args[0]);
-      dispatch(value.channel, value.args);
+      if (op === 'qwenwork.ipc') return onIpc(value);
+      if (op === 'qwenwork.ipc.part') return onIpc(onPart(value));
     },
   });
 
@@ -194,7 +217,7 @@
     throw new Error('[mmab-qwen] file attachments are not available through the bridge yet');
   }
 
-  var info = t.call('qwenwork.bootstrap', null);
+  var info = transport.bootstrapOrWait(t, 'qwenwork.bootstrap', null, '千问办公');
   root.__mmabQwProcess = {
     platform: info.platform, arch: info.arch, argv: info.argv, versions: info.versions, env: {},
     type: 'renderer', isMainFrame: true, crash: function () {},
