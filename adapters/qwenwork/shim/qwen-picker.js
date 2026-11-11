@@ -50,6 +50,17 @@
     NO_SUCH_DIALOG: '该对话框已失效（可能已超时）',
   };
 
+  // 选择器常在应用的模态对话框（例如“创建个人项目”）打开时弹出。那类对话框在 document 上监听 pointerdown / focusin，
+  // 把“对话框外”的点击当作关闭 —— 选择器挂在对话框外，真人一点就会把对话框关掉（脚本 .click() 不产生 pointerdown，
+  // 测不出来）。在宿主上截住这些事件，不让它们冒泡到 document；选择器内部的处理在宿主之前已经完成。
+  var ISOLATED_EVENTS = ['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'contextmenu',
+    'focusin', 'focusout', 'wheel', 'touchstart', 'touchmove', 'touchend', 'keydown', 'keyup', 'keypress', 'input'];
+  function isolate(host) {
+    ISOLATED_EVENTS.forEach(function (type) {
+      host.addEventListener(type, function (ev) { ev.stopPropagation(); });
+    });
+  }
+
   function el(tag, cls, text) {
     var e = doc.createElement(tag);
     if (cls) e.className = cls;
@@ -90,6 +101,7 @@
       var host = el('div');
       host.setAttribute('data-mmab-picker', '');
       var sh = host.attachShadow({ mode: 'open' });
+      isolate(host);
       var style = el('style');
       style.textContent = CSS;
       sh.appendChild(style);
@@ -365,6 +377,7 @@
   function toast(text) {
     var host = el('div');
     var sh = host.attachShadow({ mode: 'open' });
+    isolate(host);
     var box = el('div', null, text);
     box.setAttribute('role', 'status');
     box.style.cssText = 'position:fixed;left:50%;top:24px;transform:translateX(-50%);z-index:2147483647;max-width:min(560px,90vw);'

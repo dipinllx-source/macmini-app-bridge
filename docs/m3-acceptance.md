@@ -78,3 +78,11 @@
 | 越界路径 / 非被询问连接作答 / 覆盖目录 | 驱动或 payload 拒绝（离线测试） |
 
 未逐一实测：`commonCliConnectors.selectPackage`、`files.saveAs`、`saveTextDocumentAs`（同一 showOpen/SaveDialog 钩子）。
+
+## 2026-11-11 · 创建项目时选目录被“吞掉”（修复）
+
+现象：创建个人项目 → 选择文件夹 → 在网页选择器里选目录后，“创建个人项目”对话框消失，项目没有建成，后续任务仍在默认工作区。
+根因：应用的模态对话框在 document 上监听 pointerdown / focusin，把对话框外的点击当作关闭；选择器挂在对话框外。
+脚本 `.click()` 不产生 pointerdown，11-10 的验收没覆盖到。修复：选择器宿主截住鼠标 / 焦点 / 滚轮 / 键盘事件，不冒泡到 document。
+验证（正式实例，CDP 真实鼠标事件）：前往、点目录、点“选择”后对话框保持，回填“目录A · 主要”，创建项目成功（root_paths 为所选目录）；
+在输入框下方“选择项目”选中该项目后，`chats.create` 携带 `localProjectId`（请求被测试拦下，未真正创建会话）。测试项目已删除。
