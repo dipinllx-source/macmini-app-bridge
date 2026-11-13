@@ -425,6 +425,8 @@
       else if (code === 'HTTP_409') text = closeMessage(1013, 'LEASE_OCCUPIED');
       else if (code === 'BLOCKED_UPGRADE' || code === 'COMPATIBILITY_BLOCKED') {
         text = `macmini App 引桥：本机${name}已升级，平台尚未适配（${code}）。适配完成后本页会自动刷新。`;
+      } else if (code === 'PORT_OWNER_MISMATCH') {
+        text = `macmini App 引桥：平台专用的${name}实例没有在运行（应用自动升级或重启后会被关闭），需要在 Mac 上重新启动；恢复后本页会自动刷新。`;
       } else {
         text = `macmini App 引桥：暂时连不上本机${name}（${code}）。常见原因是应用刚升级或重启；恢复后本页会自动刷新。`;
       }
