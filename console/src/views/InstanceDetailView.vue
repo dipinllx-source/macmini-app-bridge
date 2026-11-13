@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import DexIcon from '../components/DexIcon.vue'
-import { listAudit, listInstances, openInstance, type ApiError, type AuditRow, type LiveInstance } from '../api/bridge'
+import PreflightDialog from '../components/PreflightDialog.vue'
+import { listAudit, listInstances, openInstance, preflightInstance, type ApiError, type AuditRow, type LiveInstance, type PreflightResult } from '../api/bridge'
 import { describeError, useSession } from '../composables/useSession'
 import { CAP_LABEL, RISK_LABEL, SKILL_HINT, SKILL_LABEL, STATE_LABEL, iconUrl, leaseText, mood, profile, typeOf } from '../dex'
 
@@ -41,17 +42,48 @@ async function load() {
   }
 }
 
-async function go() {
+const pf = ref<PreflightResult | null>(null)
+async function openNow() {
   if (!inst.value) return
   opening.value = true
   try {
     await openInstance(inst.value.id)
     await load()
   } catch (e) {
+    if ((e as ApiError).status === 401) return expired()
     msg.value = describeError(e)
   } finally {
     opening.value = false
   }
+}
+async function go() {
+  if (!inst.value) return
+  msg.value = ''
+  if (inst.value.preflight) {
+    opening.value = true
+    try {
+      const r = await preflightInstance(inst.value.id)
+      if (!r.ok) {
+        pf.value = r
+        return
+      }
+    } catch (e) {
+      if ((e as ApiError).status === 401) return expired()
+      msg.value = `检查失败：${describeError(e)}`
+      return
+    } finally {
+      opening.value = false
+    }
+    if (!inst.value.openable) {
+      msg.value = mood(inst.value).text
+      return
+    }
+  }
+  await openNow()
+}
+function pfOpen() {
+  pf.value = null
+  openNow()
 }
 
 const fmt = (at: string | number) => new Date(at).toLocaleString('zh-CN', { hour12: false })
@@ -93,9 +125,10 @@ watch(() => props.id, load)
         </div>
         <div class="hero-act">
           <p v-if="inst.lease.held && !inst.lease.mine" class="busy-hint">正被另一个页面或设备使用。关闭那个页面后即可在这里打开；断线挂起的页面会自动让位。</p>
-          <button class="go-btn" :disabled="!inst.openable || (inst.lease.held && !inst.lease.mine) || opening" @click="go">
-            {{ opening ? '召唤中…' : inst.lease.held && !inst.lease.mine ? '在别处运行中' : '出发！' }}
+          <button class="go-btn" :disabled="(!inst.openable && !inst.preflight) || (inst.lease.held && !inst.lease.mine) || opening" @click="go">
+            {{ opening ? '召唤中…' : inst.lease.held && !inst.lease.mine ? '在别处运行中' : !inst.openable ? '检查并恢复' : '出发！' }}
           </button>
+          <p v-if="msg && state === 'ok'" class="err small-msg">{{ msg }}</p>
         </div>
       </section>
 
@@ -142,6 +175,7 @@ watch(() => props.id, load)
         <router-link class="more" :to="{ path: '/security' }">在“安全与审计”中查看全部 ›</router-link>
       </section>
     </template>
+    <PreflightDialog v-if="pf && inst" :inst="inst" :result="pf" @close="pf = null" @open="pfOpen" @recovered="load" @expired="expired" />
   </div>
 </template>
 
@@ -174,6 +208,7 @@ watch(() => props.id, load)
 .tagline { font-size: 13px; color: var(--dex-ink-soft); margin: 4px 0 10px; }
 .mood { font-size: 13px; font-weight: 700; margin-top: 6px; }
 .hero-act { flex: none; max-width: 230px; text-align: right; }
+.small-msg { font-size: 12px; margin: 8px 0 0; }
 .busy-hint { font-size: 12px; color: var(--dex-ink-soft); margin: 0 0 8px; line-height: 1.5; }
 th { text-align: left; padding: 6px; border-bottom: 3px solid var(--dex-line); font-size: 12px; white-space: nowrap; }
 tbody tr { cursor: pointer; }

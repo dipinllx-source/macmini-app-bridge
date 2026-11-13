@@ -102,6 +102,52 @@ public class InstancesController {
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND));
     }
 
+    private io.github.dipinllx.macminiappbridge.instances.InstancePreflight preflight;
+
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    void setPreflight(io.github.dipinllx.macminiappbridge.instances.InstancePreflight preflight) {
+        this.preflight = preflight;
+    }
+
+    /**
+     * 打开前检查（例如本地应用自动升级后平台尚未跟上）。只运行配置里的固定命令；未配置时 ok=true。
+     * 实例未就绪时也可以检查（恢复正是为了让它重新就绪）。
+     */
+    @GetMapping("/instances/{id}/preflight")
+    public Map<String, Object> preflightCheck(@PathVariable String id, ServerWebExchange ex) {
+        Requests.consoleSession(ex);
+        InstanceRuntime rt = require(id);
+        if (preflight == null) {
+            return Map.of("configured", false, "ok", true, "problems", List.of());
+        }
+        return preflight.check(rt.config());
+    }
+
+    /** 后台运行配置里的恢复命令（写请求：GuardFilter 已校验精确 Origin + CSRF）。恢复可能重启平台本身。 */
+    @PostMapping("/instances/{id}/recover")
+    public ResponseEntity<Map<String, Object>> recover(@PathVariable String id, ServerWebExchange ex) {
+        ConsoleSession s = Requests.consoleSession(ex);
+        InstanceRuntime rt = require(id);
+        if (preflight == null || rt.config().preflight() == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
+        }
+        try {
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(preflight.recover(rt.config(), s.id()));
+        } catch (IllegalStateException e) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, ErrorCode.ADAPTER_UNAVAILABLE);
+        }
+    }
+
+    @GetMapping("/instances/{id}/recover")
+    public Map<String, Object> recoverStatus(@PathVariable String id, ServerWebExchange ex) {
+        Requests.consoleSession(ex);
+        InstanceRuntime rt = require(id);
+        if (preflight == null || rt.config().preflight() == null) {
+            throw new ApiException(HttpStatus.NOT_FOUND, ErrorCode.NOT_FOUND);
+        }
+        return preflight.status(rt.config());
+    }
+
     @PostMapping("/instances/{id}/leases")
     public ResponseEntity<Map<String, Object>> acquire(@PathVariable String id, ServerWebExchange ex) {
         ConsoleSession s = Requests.consoleSession(ex);
@@ -194,6 +240,7 @@ public class InstancesController {
         m.put("blockedReason", rt.blockedReason() == null ? null : rt.blockedReason().name());
         m.put("generation", rt.generation());
         m.put("openable", rt.ready() && listeners.instancePort(rt.id()).isPresent());
+        m.put("preflight", rt.config().preflight() != null);
         AdapterDescriptor d = rt.descriptor();
         if (d != null) {
             m.put("profileId", d.profileId());

@@ -23,6 +23,8 @@ export interface LiveInstance {
   profileId?: string
   risk?: string
   capabilities?: Record<string, string>
+  /** 配置了打开前检查（例如 Codex 自动升级后的版本校验与恢复） */
+  preflight?: boolean
   lease: { held: boolean; mine: boolean; leaseId?: string; expiresAt?: string }
 }
 
@@ -101,6 +103,36 @@ export async function openInstance(id: string): Promise<void> {
   } finally {
     form.remove()
   }
+}
+
+export interface PreflightResult {
+  configured: boolean
+  ok: boolean
+  installedVersion?: string | null
+  expectedVersion?: string | null
+  recovering?: boolean
+  problems: { code: string; message: string }[]
+}
+
+export interface RecoverStatus {
+  running: boolean
+  startedAt: string | null
+  exitCode: number | null
+  logTail: string[]
+}
+
+/** 打开前检查：本机应用版本、页面资源、专用实例是否符合平台预期。 */
+export function preflightInstance(id: string): Promise<PreflightResult> {
+  return call<PreflightResult>('GET', `/instances/${encodeURIComponent(id)}/preflight`)
+}
+
+/** 后台运行配置里的恢复命令（可能会重启平台本身）。 */
+export function startRecover(id: string): Promise<RecoverStatus> {
+  return call<RecoverStatus>('POST', `/instances/${encodeURIComponent(id)}/recover`)
+}
+
+export function recoverStatus(id: string): Promise<RecoverStatus> {
+  return call<RecoverStatus>('GET', `/instances/${encodeURIComponent(id)}/recover`)
 }
 
 export interface AuditRow {

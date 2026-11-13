@@ -235,13 +235,20 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
      * @param enabled     是否开监听并启动适配器
      * @param verifyCapabilities 操作者为验证 / 切换窗口显式开启的能力 ID（ADR-0005）：只能是 adapter.yaml 中
      *                    状态为 SUPPORTED、但平台路径尚无 live 证据的能力；启动时写审计
+     * @param preflight   可选：控制台打开实例前的本机检查与恢复命令（例如本地应用自动升级后补资源、补专用实例）
      */
     public record Instance(String id, String appId, String displayName, int port, String strategy, boolean enabled,
-            List<String> verifyCapabilities) {
+            List<String> verifyCapabilities, Preflight preflight) {
 
         /** M1 兼容构造器。 */
         public Instance(String id, String appId, String displayName, int port, String strategy, boolean enabled) {
-            this(id, appId, displayName, port, strategy, enabled, null);
+            this(id, appId, displayName, port, strategy, enabled, null, null);
+        }
+
+        /** M3 兼容构造器。 */
+        public Instance(String id, String appId, String displayName, int port, String strategy, boolean enabled,
+                List<String> verifyCapabilities) {
+            this(id, appId, displayName, port, strategy, enabled, verifyCapabilities, null);
         }
 
         @ConstructorBinding
@@ -251,6 +258,27 @@ public record MmabProperties(Platform platform, Console console, List<Instance> 
             }
             requirePort(port, "mmab.instances[" + id + "].port");
             verifyCapabilities = verifyCapabilities == null ? List.of() : List.copyOf(verifyCapabilities);
+        }
+    }
+
+    /**
+     * 打开实例前的检查与恢复（操作者配置的固定命令，不接受浏览器传入的任何参数）。
+     *
+     * @param check   检查命令：退出后在 stdout 输出 JSON
+     *                {@code {"ok":bool,"installedVersion":..,"expectedVersion":..,"problems":[{"code":..,"message":..}]}}
+     * @param recover 恢复命令：后台运行，输出写入 data-dir/preflight/<实例>-recover.log；可以重启平台本身
+     * @param timeout 检查命令超时（默认 15s）
+     */
+    public record Preflight(List<String> check, List<String> recover, Duration timeout) {
+
+        @ConstructorBinding
+        public Preflight {
+            if (check == null || check.isEmpty() || recover == null || recover.isEmpty()) {
+                throw new IllegalArgumentException("mmab.instances[].preflight needs check and recover commands");
+            }
+            check = List.copyOf(check);
+            recover = List.copyOf(recover);
+            timeout = timeout == null ? Duration.ofSeconds(15) : timeout;
         }
     }
 

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import DexIcon from '../components/DexIcon.vue'
+import PreflightDialog from '../components/PreflightDialog.vue'
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { listAudit, listInstances, openInstance, type ApiError, type AuditRow, type LiveInstance } from '../api/bridge'
+import { listAudit, listInstances, openInstance, preflightInstance, type ApiError, type AuditRow, type LiveInstance, type PreflightResult } from '../api/bridge'
 import { describeError, useSession } from '../composables/useSession'
 import { CAP_LABEL, SKILL_LABEL, iconUrl, leaseText, mood, profile, typeOf as type } from '../dex'
 
@@ -18,7 +19,7 @@ let timer: number | undefined
 function buttonText(i: LiveInstance) {
   if (opening.value === i.id) return '召唤中…'
   if (!i.enabled) return '休息中'
-  if (!i.openable) return '暂时出不了门'
+  if (!i.openable) return i.preflight ? '检查并恢复' : '暂时出不了门'
   if (i.lease.held && !i.lease.mine) return '在别处运行中'
   return i.lease.mine ? '再开一扇窗' : '出发！'
 }
@@ -84,17 +85,45 @@ function flash(text: string, kind: 'ok' | 'err') {
   toast.value = { text, kind }
   setTimeout(() => (toast.value = null), 3500)
 }
-async function go(i: LiveInstance) {
+// 打开前检查（配置了 preflight 的实例，例如 Codex 自动升级后）：不符合预期时弹出说明与“恢复”
+const pf = ref<{ inst: LiveInstance; result: PreflightResult } | null>(null)
+async function openNow(i: LiveInstance) {
   opening.value = i.id
   try {
     await openInstance(i.id)
     flash(`${i.displayName}，就决定是你了！已在新标签页打开`, 'ok')
     await refresh()
   } catch (e) {
+    if ((e as ApiError).status === 401) return expired()
     flash(describeError(e), 'err')
   } finally {
     opening.value = null
   }
+}
+async function go(i: LiveInstance) {
+  if (i.preflight) {
+    opening.value = i.id
+    try {
+      const r = await preflightInstance(i.id)
+      if (!r.ok) {
+        pf.value = { inst: i, result: r }
+        return
+      }
+    } catch (e) {
+      if ((e as ApiError).status === 401) return expired()
+      flash(`检查失败：${describeError(e)}`, 'err')
+      return
+    } finally {
+      opening.value = null
+    }
+    if (!i.openable) return flash(mood(i).text, 'err')
+  }
+  await openNow(i)
+}
+function pfOpen() {
+  const i = pf.value?.inst
+  pf.value = null
+  if (i) openNow(i)
 }
 function tick() {
   if (document.visibilityState === 'visible') refresh()
@@ -169,7 +198,7 @@ onUnmounted(() => {
           </div>
 
           <div class="actions">
-            <button class="go-btn" :disabled="!i.openable || (i.lease.held && !i.lease.mine) || opening === i.id"
+            <button class="go-btn" :disabled="(!i.openable && !i.preflight) || (i.lease.held && !i.lease.mine) || opening === i.id"
               :title="buttonHint(i)" @click="go(i)">
               {{ buttonText(i) }}
             </button>
@@ -192,90 +221,6 @@ onUnmounted(() => {
         <router-link class="more" to="/security">查看完整审计 ›</router-link>
       </aside>
     </div>
+    <PreflightDialog v-if="pf" :inst="pf.inst" :result="pf.result" @close="pf = null" @open="pfOpen" @recovered="refresh" @expired="expired" />
   </div>
 </template>
-
-<style scoped>
-.badges { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
-.badge { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
-.b-icon {
-  width: 46px; height: 46px; flex: none; display: grid; place-items: center; border-radius: 14px;
-  border: 3px solid var(--dex-line); color: var(--dex-ink); animation: floaty 3.2s ease-in-out infinite;
-}
-.b-icon.medal { background: #fff3c4; }
-.b-icon.play { background: #ffe1d9; }
-.b-icon.heart { background: #e3fbe7; }
-.log h3 { display: flex; align-items: center; gap: 6px; }
-.ico { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px; background: #f1f2f7; color: var(--dex-ink); }
-.ico.revive { background: #e3fbe7; } .ico.alert, .ico.lock { background: #ffe1d9; } .ico.spark, .ico.key, .ico.door { background: #fff3c4; }
-.ico.moon, .ico.pause { background: #e3f1ff; }
-.b-num { font-size: 24px; font-weight: 900; line-height: 1; }
-.b-label { font-size: 12px; color: var(--dex-ink-soft); font-weight: 700; margin-top: 3px; }
-
-.grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 18px; align-items: start; }
-.cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: stretch; }
-.empty { padding: 30px; text-align: center; color: var(--dex-ink-soft); font-weight: 700; }
-
-.app-card {
-  padding: 16px 18px 14px; position: relative; overflow: hidden; display: flex; flex-direction: column;
-  transition: transform 0.18s cubic-bezier(.2,.9,.2,1.4), box-shadow 0.18s;
-}
-.app-card::before {
-  content: ''; position: absolute; inset: 0 0 auto 0; height: 64px;
-  background: linear-gradient(135deg, var(--accent) 0%, transparent 85%); opacity: 0.18; pointer-events: none;
-}
-.app-card:hover { transform: translateY(-4px) rotate(-0.4deg); box-shadow: 0 8px 0 rgba(43,45,66,0.9); }
-.app-card.off { filter: saturate(0.3); opacity: 0.75; }
-.card-head { display: flex; gap: 14px; align-items: center; position: relative; }
-.avatar {
-  width: 68px; height: 68px; flex: none; border-radius: 22px; display: grid; place-items: center;
-  background: #fff; border: 3px solid var(--dex-line); overflow: hidden; color: var(--dex-ink);
-  box-shadow: 0 0 0 4px var(--accent);
-  animation: floaty 3s ease-in-out infinite;
-}
-.avatar:has(.fallback-icon) { background: #eef6ff; }
-.avatar img { width: 64px; height: 64px; object-fit: contain; -webkit-user-drag: none; image-rendering: auto; }
-.avatar.sleepy { animation-duration: 6s; filter: grayscale(0.4); }
-.title { min-width: 0; }
-.name-row { display: flex; align-items: baseline; gap: 8px; }
-.name { font-size: 19px; }
-.lv { font-size: 12px; font-weight: 900; color: var(--dex-ink-soft); }
-.tagline { font-size: 12px; color: var(--dex-ink-soft); margin: 2px 0 6px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.lease { font-size: 12px; font-weight: 800; padding: 1px 8px; border-radius: 999px; border: 2px solid var(--dex-line); background: #fff; }
-.lease.mine { background: var(--dex-yellow); }
-.lease.busy { background: #ffe1d9; }
-.port { font-size: 12px; font-family: ui-monospace, Menlo, monospace; color: var(--dex-ink-soft); }
-.hp { margin-top: 14px; }
-.mood { font-size: 13px; font-weight: 700; margin: 6px 0 10px; }
-.skills { margin-bottom: 4px; }
-.skill small { font-weight: 600; opacity: 0.75; }
-.actions { display: flex; align-items: center; justify-content: space-between; margin-top: auto; padding-top: 12px; }
-.more { font-size: 13px; font-weight: 800; color: var(--dex-red); text-decoration: none; }
-.more:hover { text-decoration: underline; }
-
-.log { padding: 16px 16px 12px; position: sticky; top: 14px; }
-.log h3 { margin: 0 0 10px; font-size: 16px; }
-.log ul { list-style: none; margin: 0 0 8px; padding: 0; }
-.log li { display: grid; grid-template-columns: 28px 1fr 44px; gap: 6px; align-items: baseline; padding: 7px 0; border-bottom: 2px dashed #eceaf0; font-size: 13px; }
-.log li:last-child { border-bottom: none; }
-.log time { text-align: right; font-size: 11px; color: var(--dex-ink-soft); font-variant-numeric: tabular-nums; }
-.quiet { color: var(--dex-ink-soft); font-size: 13px; }
-
-.toast {
-  position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 20;
-  padding: 10px 18px; border-radius: 14px; border: 3px solid var(--dex-line); box-shadow: var(--dex-shadow);
-  font-weight: 800; background: #fff;
-}
-.toast.ok { background: #e3fbe7; }
-.toast.err { background: #ffe1d9; }
-.toast-enter-active, .toast-leave-active { transition: all 0.25s; }
-.toast-enter-from, .toast-leave-to { opacity: 0; transform: translate(-50%, 16px); }
-
-@media (max-width: 1100px) { .cards { grid-template-columns: 1fr; } }
-@media (max-width: 900px) {
-  .grid { grid-template-columns: 1fr; }
-  .log { position: static; }
-  .badges { grid-template-columns: 1fr; }
-}
-</style>
